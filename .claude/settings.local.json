@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pkg-config --modversion opencv4)",
+      "Bash(pkg-config --modversion opencv)",
+      "Bash(brew list *)",
+      "Bash(mkdir -p build)",
+      "Bash(cmake ..)",
+      "Bash(make)"
+    ]
+  }
+}

@@ -1,0 +1,3 @@
+/Users/lin/Projects/FlipBookGenerator/build/CMakeFiles/flipbook.dir
+/Users/lin/Projects/FlipBookGenerator/build/CMakeFiles/edit_cache.dir
+/Users/lin/Projects/FlipBookGenerator/build/CMakeFiles/rebuild_cache.dir
