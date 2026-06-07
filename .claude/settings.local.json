@@ -6,7 +6,8 @@
       "Bash(brew list *)",
       "Bash(mkdir -p build)",
       "Bash(cmake ..)",
-      "Bash(make)"
+      "Bash(make)",
+      "Bash(./build/flipbook)"
     ]
   }
 }
