@@ -13,6 +13,8 @@ V0.2
   读取 assets/ 中 PNG 图片，按文件名排序，横向拼接为 Sprite Sheet，输出到 output/spritesheet.png
 - V0.2: Auto-normalize frame sizes with transparent background, center-align each frame, then concatenate
   自动统一帧尺寸（透明背景），居中对齐每帧，再进行拼接
+- V0.2.1: Runtime prompt for target frame size (default: 32), scale-to-fit with aspect ratio preserved
+  运行时询问目标帧尺寸（默认 32），按比例缩放适配
 
 ## Planned Features / 待开发功能
 

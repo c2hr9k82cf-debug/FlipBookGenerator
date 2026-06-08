@@ -8,6 +8,7 @@
 #include <vector>
 #include <string>
 #include <algorithm>
+#include <limits>
 
 namespace fs = std::filesystem;
 
@@ -15,6 +16,27 @@ int main() {
     const std::string inputDir = "assets";
     const std::string outputDir = "output";
     const std::string outputFile = outputDir + "/spritesheet.png";
+
+    // Ask for target frame size (default: 32)
+    // 询问目标帧尺寸（默认：32）
+    std::cout << "Enter target frame size (default: 32): ";
+    std::string sizeInput;
+    std::getline(std::cin, sizeInput);
+
+    int targetSize = 32;
+    if (!sizeInput.empty()) {
+        try {
+            targetSize = std::stoi(sizeInput);
+            if (targetSize <= 0) {
+                std::cerr << "Error: Size must be positive." << std::endl;
+                return 1;
+            }
+        } catch (...) {
+            std::cerr << "Error: Invalid number." << std::endl;
+            return 1;
+        }
+    }
+    std::cout << "Target frame size: " << targetSize << "x" << targetSize << std::endl;
 
     // Check input directory
     // 检查输入目录
@@ -62,18 +84,8 @@ int main() {
         return 1;
     }
 
-    // Find max dimensions across all frames
-    // 找出所有帧中的最大宽高
-    int maxW = 0, maxH = 0;
-    for (const auto& img : images) {
-        maxW = std::max(maxW, img.cols);
-        maxH = std::max(maxH, img.rows);
-    }
-    std::cout << "Normalized size: " << maxW << "x" << maxH
-              << " (transparent background)" << std::endl;
-
-    // Normalize each frame: center-paste onto a transparent canvas
-    // 统一每帧：居中粘贴到透明画布上
+    // Normalize each frame: scale to fit within target size, center on transparent canvas
+    // 统一每帧：缩放适配目标尺寸，居中放到透明画布上
     std::vector<cv::Mat> normalized;
     for (size_t i = 0; i < images.size(); i++) {
         cv::Mat img = images[i];
@@ -86,18 +98,30 @@ int main() {
             cv::cvtColor(img, img, cv::COLOR_GRAY2BGRA);
         }
 
-        // Create transparent canvas of max size
-        // 创建最大尺寸的透明画布
-        cv::Mat canvas = cv::Mat::zeros(maxH, maxW, CV_8UC4);
+        // Scale to fit within target size while preserving aspect ratio
+        // 缩放适配目标尺寸，保持宽高比
+        double scale = std::min(
+            static_cast<double>(targetSize) / img.cols,
+            static_cast<double>(targetSize) / img.rows
+        );
+        int newW = static_cast<int>(img.cols * scale);
+        int newH = static_cast<int>(img.rows * scale);
 
-        // Calculate offset to center the frame
+        cv::Mat scaled;
+        cv::resize(img, scaled, cv::Size(newW, newH), 0, 0, cv::INTER_AREA);
+
+        // Create transparent canvas of target size
+        // 创建目标尺寸的透明画布
+        cv::Mat canvas = cv::Mat::zeros(targetSize, targetSize, CV_8UC4);
+
+        // Calculate offset to center the scaled frame
         // 计算居中偏移量
-        int x = (maxW - img.cols) / 2;
-        int y = (maxH - img.rows) / 2;
+        int x = (targetSize - newW) / 2;
+        int y = (targetSize - newH) / 2;
 
-        // Paste frame onto canvas
-        // 将帧粘贴到画布上
-        img.copyTo(canvas(cv::Rect(x, y, img.cols, img.rows)));
+        // Paste scaled frame onto canvas
+        // 将缩放后的帧粘贴到画布上
+        scaled.copyTo(canvas(cv::Rect(x, y, newW, newH)));
 
         normalized.push_back(canvas);
     }

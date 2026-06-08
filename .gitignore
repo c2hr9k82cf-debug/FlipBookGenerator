@@ -1,0 +1,9 @@
+# Build output / 构建产物
+build/
+
+# macOS / macOS 系统文件
+.DS_Store
+
+# Editor swap files / 编辑器临时文件
+*.swp
+*~
