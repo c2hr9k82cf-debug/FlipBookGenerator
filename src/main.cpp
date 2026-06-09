@@ -1,7 +1,3 @@
-// FlipBookGenerator V0.2
-// Auto-normalize frame sizes with transparent background, then concatenate to sprite sheet
-// 自动统一帧尺寸（透明背景），拼接为 Sprite Sheet
-
 #include <opencv2/opencv.hpp>
 #include <filesystem>
 #include <iostream>
