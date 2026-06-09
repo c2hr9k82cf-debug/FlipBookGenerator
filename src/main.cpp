@@ -1,3 +1,7 @@
+// FlipBookGenerator V0.3
+// Sprite sheet generation with animation preview
+// Sprite Sheet 生成 + 动画预览
+
 #include <opencv2/opencv.hpp>
 #include <filesystem>
 #include <iostream>
@@ -134,6 +138,134 @@ int main() {
 
     std::cout << "Spritesheet saved: " << outputFile
               << " (" << spritesheet.cols << "x" << spritesheet.rows << ")" << std::endl;
+
+    // --- Animation Preview / 动画预览 ---
+
+    // Ask if user wants to preview
+    // 询问是否预览
+    std::cout << "Preview animation? (y/n, default: y): ";
+    std::string previewInput;
+    std::getline(std::cin, previewInput);
+
+    if (previewInput == "n" || previewInput == "N") {
+        std::cout << "Done." << std::endl;
+        return 0;
+    }
+
+    // Split sprite sheet into individual frames
+    // 将 Sprite Sheet 拆分为单独的帧
+    std::vector<cv::Mat> frames;
+    int numFrames = spritesheet.cols / targetSize;
+    for (int i = 0; i < numFrames; i++) {
+        cv::Rect roi(i * targetSize, 0, targetSize, spritesheet.rows);
+        frames.push_back(spritesheet(roi).clone());
+    }
+
+    // Scale up frames for better visibility
+    // 放大帧以便观看
+    const int zoomFactor = 8;
+    const int displaySize = targetSize * zoomFactor;
+
+    std::vector<cv::Mat> displayFrames;
+    for (auto& frame : frames) {
+        cv::Mat displayFrame;
+        cv::resize(frame, displayFrame, cv::Size(displaySize, displaySize), 0, 0, cv::INTER_NEAREST);
+
+        // Convert BGRA to BGR for display (imshow doesn't handle alpha well)
+        // 转换 BGRA 为 BGR 以正确显示（imshow 不支持 alpha 通道）
+        cv::Mat bgrFrame;
+        cv::cvtColor(displayFrame, bgrFrame, cv::COLOR_BGRA2BGR);
+        displayFrames.push_back(bgrFrame);
+    }
+
+    // Preview settings
+    // 预览设置
+    const std::string windowName = "FlipBook Preview";
+    int fps = 8;
+    int delay = 1000 / fps;
+    bool paused = false;
+    size_t currentFrame = 0;
+
+    cv::namedWindow(windowName, cv::WINDOW_AUTOSIZE);
+
+    // Helper: print status to console
+    // 辅助函数：在控制台打印状态
+    auto printStatus = [&]() {
+        std::string status = paused ? "PAUSED / 已暂停" : "PLAYING / 播放中";
+        std::cout << "\r[" << status << "] Frame " << currentFrame + 1
+                  << "/" << numFrames << " | FPS: " << fps << std::flush;
+    };
+
+    std::cout << "\nPreview Controls / 预览控制:" << std::endl;
+    std::cout << "  Space   - Pause/Resume / 暂停/继续" << std::endl;
+    std::cout << "  A / D   - Prev/Next frame / 上一帧/下一帧" << std::endl;
+    std::cout << "  W / S   - Speed up/Down / 加速/减速" << std::endl;
+    std::cout << "  Q / ESC - Quit / 退出" << std::endl;
+    std::cout << std::endl;
+
+    // Animation loop
+    // 动画循环
+    while (true) {
+        // Update console status
+        // 更新控制台状态
+        printStatus();
+
+        // Show current frame
+        // 显示当前帧
+        cv::imshow(windowName, displayFrames[currentFrame]);
+
+        // Wait for key input
+        // 等待按键输入
+        int key = cv::waitKey(paused ? 0 : delay) & 0xFF;
+
+        if (key == 'q' || key == 'Q' || key == 27) {
+            // Q or ESC to quit / Q 或 ESC 退出
+            break;
+        } else if (key == ' ') {
+            // Space to toggle pause / 空格切换暂停
+            paused = !paused;
+            std::cout << (paused ? "Paused / 已暂停" : "Playing / 播放中") << std::endl;
+        } else if (key == 'a' || key == 'A') {
+            // A - previous frame / A - 上一帧
+            if (paused) {
+                currentFrame = (currentFrame - 1 + numFrames) % numFrames;
+            } else {
+                paused = true;
+                currentFrame = (currentFrame - 1 + numFrames) % numFrames;
+            }
+            std::cout << "Frame: " << currentFrame + 1 << "/" << numFrames
+                      << " | FPS: " << fps << std::endl;
+        } else if (key == 'd' || key == 'D') {
+            // D - next frame / D - 下一帧
+            if (paused) {
+                currentFrame = (currentFrame + 1) % numFrames;
+            } else {
+                paused = true;
+                currentFrame = (currentFrame + 1) % numFrames;
+            }
+            std::cout << "Frame: " << currentFrame + 1 << "/" << numFrames
+                      << " | FPS: " << fps << std::endl;
+        } else if (key == 'w' || key == 'W') {
+            // W - increase FPS / W - 加速
+            fps = std::min(fps + 2, 60);
+            delay = 1000 / fps;
+            std::cout << "Speed up / 加速 -> FPS: " << fps << std::endl;
+        } else if (key == 's' || key == 'S') {
+            // S - decrease FPS / S - 减速
+            fps = std::max(fps - 2, 1);
+            delay = 1000 / fps;
+            std::cout << "Speed down / 减速 -> FPS: " << fps << std::endl;
+        }
+
+        // Advance frame if not paused
+        // 非暂停状态下前进一帧
+        if (!paused) {
+            currentFrame = (currentFrame + 1) % numFrames;
+        }
+    }
+
+    cv::destroyAllWindows();
+    std::cout << "Preview closed. Done." << std::endl;
 
     return 0;
 }
