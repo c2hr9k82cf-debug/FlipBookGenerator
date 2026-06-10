@@ -5,7 +5,7 @@ Animation resource generation tool for indie game developers.
 
 ## Current Version / 当前版本
 
-V0.4.1
+V0.4.5
 
 ## Completed Features / 已完成功能
 
@@ -21,6 +21,14 @@ V0.4.1
   身体部件提取，格子编辑器，鼠标涂色，6 个固定部件（头、躯干、手臂、腿）
 - V0.4.1: Code modularization — split main.cpp into utils, spritesheet, extractor modules
   代码模块化 — 将 main.cpp 拆分为 utils、spritesheet、extractor 模块
+- V0.4.2: Auto detection using k-means color clustering, 3 modes (manual/auto/auto+refine)
+  自动检测（k-means 颜色聚类），3 种模式（手动/自动/自动+微调）
+- V0.4.3: Editor UX improvements — white background, eraser tool (key 7), highlight current part only, hide others
+  编辑器 UX 改进 — 白色背景、橡皮工具（按键 7）、仅高亮当前部件、隐藏其他部件
+- V0.4.4: Editor display fix — original image visible, light gray bg, unified overlay, eraser only erases selected part
+  编辑器显示修复 — 原图可见、浅灰背景、统一覆盖层、橡皮仅擦除选中部件
+- V0.4.5: Editor visibility — colored grid border + center cross for selected cells
+  编辑器可见性 — 选中格子彩色边框 + 中心十字标记
 
 ## Roadmap / 版本路线图
 
@@ -130,3 +138,10 @@ cd ..
   注释双语：英文在上，中文在下
 - All image processing runs locally, no cloud dependency
   所有图像处理本地运行，无云端依赖
+
+## Future Improvements / 未来改进
+
+- Batch selection and delete in editor (select multiple cells at once)
+  编辑器批量选择和删除（一次选择多个格子）
+- GUI with drag-drop, buttons, and visual part switching
+  可视化界面：拖拽图片、按钮、部件切换

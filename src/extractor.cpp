@@ -15,13 +15,15 @@ namespace fs = std::filesystem;
 // Global state for mouse callback / 鼠标回调全局状态
 struct EditorState {
     cv::Mat partMap;       // each pixel stores part ID (0=unassigned) / 每像素存储部件 ID
-    int currentPart = 1;   // currently selected part / 当前选中的部件
+    int currentPart = 1;   // currently selected part (1-6) / 当前选中部件 (1-6)
+    int mode = 0;          // 0=paint, 1=eraser / 0=涂色, 1=橡皮
+    int eraserTarget = 1;  // which part eraser can erase / 橡皮可擦除的部件
     int zoomFactor = 8;    // display zoom / 显示缩放
     bool needsRedraw = true;
     cv::Mat originalImage; // original loaded image / 原始加载图片
 };
 
-// Mouse callback: paint cells with current part / 鼠标回调：用当前部件涂色
+// Mouse callback: paint/erase cells with left click / 鼠标回调：左键涂色/擦除
 static void onMouse(int event, int x, int y, int flags, void* userdata) {
     EditorState* state = static_cast<EditorState*>(userdata);
 
@@ -35,31 +37,27 @@ static void onMouse(int event, int x, int y, int flags, void* userdata) {
         return;
     }
 
-    bool paint = false;
-    int partId = state->currentPart;
-
-    if (event == cv::EVENT_LBUTTONDOWN || event == cv::EVENT_MOUSEMOVE) {
-        // Left click or drag: assign current part / 左键或拖拽：分配当前部件
-        if (event == cv::EVENT_LBUTTONDOWN || (flags & cv::EVENT_FLAG_LBUTTON)) {
-            paint = true;
-            partId = state->currentPart;
+    // Left click or drag: paint or erase
+    // 左键或拖拽：涂色或擦除
+    if (event == cv::EVENT_LBUTTONDOWN ||
+        (event == cv::EVENT_MOUSEMOVE && (flags & cv::EVENT_FLAG_LBUTTON))) {
+        if (state->mode == 1) {
+            // Eraser mode: only erase the target part / 橡皮模式：仅擦除目标部件
+            uchar cellPart = state->partMap.at<uchar>(imgY, imgX);
+            if (cellPart == static_cast<uchar>(state->eraserTarget)) {
+                state->partMap.at<uchar>(imgY, imgX) = 0;
+                state->needsRedraw = true;
+            }
+        } else {
+            // Paint mode: assign current part / 涂色模式：分配当前部件
+            state->partMap.at<uchar>(imgY, imgX) = static_cast<uchar>(state->currentPart);
+            state->needsRedraw = true;
         }
-    } else if (event == cv::EVENT_RBUTTONDOWN || event == cv::EVENT_MOUSEMOVE) {
-        // Right click or drag: unassign / 右键或拖拽：取消分配
-        if (event == cv::EVENT_RBUTTONDOWN || (flags & cv::EVENT_FLAG_RBUTTON)) {
-            paint = true;
-            partId = 0;
-        }
-    }
-
-    if (paint) {
-        state->partMap.at<uchar>(imgY, imgX) = static_cast<uchar>(partId);
-        state->needsRedraw = true;
     }
 }
 
-// Build display image: original + semi-transparent part overlay + grid
-// 构建显示图片：原始图 + 半透明部件覆盖 + 网格
+// Build display image: original image + light overlay + grid
+// 构建显示图片：原始图 + 浅色覆盖 + 网格
 static cv::Mat buildDisplayImage(const EditorState& state) {
     int w = state.originalImage.cols;
     int h = state.originalImage.rows;
@@ -81,37 +79,189 @@ static cv::Mat buildDisplayImage(const EditorState& state) {
         display = scaled.clone();
     }
 
-    // Draw semi-transparent part overlay
-    // 绘制半透明部件覆盖
+    // Light gray background behind transparent areas
+    // 透明区域显示浅灰背景
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            cv::Vec4b pixel = state.originalImage.at<cv::Vec4b>(y, x);
+            if (pixel[3] == 0) {
+                cv::Rect cell(x * z, y * z, z, z);
+                cv::rectangle(display, cell, cv::Scalar(230, 230, 230), cv::FILLED);
+            }
+        }
+    }
+
+    // Draw overlay for assigned cells
+    // 绘制已分配格子的覆盖层
     cv::Mat overlay = display.clone();
     for (int y = 0; y < h; y++) {
         for (int x = 0; x < w; x++) {
             int partId = state.partMap.at<uchar>(y, x);
             if (partId > 0 && partId <= static_cast<int>(PARTS.size())) {
-                cv::Scalar color = PARTS[partId - 1].color;
-                // Fill the zoomed cell with part color
-                // 用部件颜色填充缩放后的格子
                 cv::Rect cell(x * z, y * z, z, z);
-                cv::rectangle(overlay, cell, color, cv::FILLED);
+                if (state.mode == 0 && partId == state.currentPart) {
+                    // Paint mode + current part: highlight blue
+                    // 涂色模式 + 当前部件：蓝色高亮
+                    cv::rectangle(overlay, cell, cv::Scalar(100, 150, 255), cv::FILLED);
+                } else if (state.mode == 1 && partId == state.eraserTarget) {
+                    // Eraser mode + target part: highlight red
+                    // 橡皮模式 + 目标部件：红色高亮
+                    cv::rectangle(overlay, cell, cv::Scalar(100, 100, 255), cv::FILLED);
+                } else {
+                    // Other parts: light blue-gray
+                    // 其他部件：浅蓝灰色
+                    cv::rectangle(overlay, cell, cv::Scalar(200, 210, 220), cv::FILLED);
+                }
             }
         }
     }
 
-    // Blend overlay with original (alpha = 0.4)
-    // 混合覆盖层与原图（透明度 0.4）
-    cv::addWeighted(overlay, 0.4, display, 0.6, 0, display);
+    // Blend overlay with original (alpha = 0.3)
+    // 混合覆盖层与原图（透明度 0.3）
+    cv::addWeighted(overlay, 0.3, display, 0.7, 0, display);
 
-    // Draw grid lines
-    // 绘制网格线
-    cv::Scalar gridColor(128, 128, 128);
+    // Draw grid lines and highlight markers
+    // 绘制网格线和高亮标记
+    cv::Scalar gridColor(200, 200, 200);  // default grid color / 默认网格颜色
+
+    // Draw vertical grid lines
+    // 绘制垂直网格线
     for (int x = 0; x <= w; x++) {
         cv::line(display, cv::Point(x * z, 0), cv::Point(x * z, h * z), gridColor, 1);
     }
+    // Draw horizontal grid lines
+    // 绘制水平网格线
     for (int y = 0; y <= h; y++) {
         cv::line(display, cv::Point(0, y * z), cv::Point(w * z, y * z), gridColor, 1);
     }
 
+    // Draw colored border + cross for selected cells
+    // 绘制选中格子的彩色边框 + 十字
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            int partId = state.partMap.at<uchar>(y, x);
+            bool isSelected = false;
+            cv::Scalar highlightColor;
+
+            if (state.mode == 0 && partId == state.currentPart && partId > 0) {
+                // Paint mode + current part / 涂色模式 + 当前部件
+                isSelected = true;
+                highlightColor = cv::Scalar(255, 100, 0);  // bright blue / 亮蓝色
+            } else if (state.mode == 1 && partId == state.eraserTarget && partId > 0) {
+                // Eraser mode + target part / 橡皮模式 + 目标部件
+                isSelected = true;
+                highlightColor = cv::Scalar(0, 0, 255);  // bright red / 亮红色
+            }
+
+            if (isSelected) {
+                cv::Rect cell(x * z, y * z, z, z);
+
+                // Draw thick colored border / 绘制粗彩色边框
+                cv::rectangle(display, cell, highlightColor, 2);
+
+                // Draw cross in center / 绘制中心十字
+                int cx = x * z + z / 2;
+                int cy = y * z + z / 2;
+                int crossLen = z / 3;
+                cv::line(display, cv::Point(cx - crossLen, cy), cv::Point(cx + crossLen, cy),
+                         highlightColor, 2);
+                cv::line(display, cv::Point(cx, cy - crossLen), cv::Point(cx, cy + crossLen),
+                         highlightColor, 2);
+            }
+        }
+    }
+
     return display;
+}
+
+// Auto detect body parts using k-means color clustering
+// 使用 k-means 颜色聚类自动检测身体部件
+cv::Mat autoDetectParts(const cv::Mat& img, int k) {
+    int w = img.cols;
+    int h = img.rows;
+
+    // Collect non-transparent pixels as samples
+    // 收集非透明像素作为样本
+    std::vector<cv::Vec4f> samples;
+    std::vector<cv::Point> positions;
+
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            cv::Vec4b pixel = img.at<cv::Vec4b>(y, x);
+            if (pixel[3] > 0) {  // non-transparent / 非透明
+                samples.push_back(cv::Vec4f(pixel[0], pixel[1], pixel[2], pixel[3]));
+                positions.push_back(cv::Point(x, y));
+            }
+        }
+    }
+
+    if (samples.empty()) {
+        std::cerr << "Error: Image is completely transparent." << std::endl;
+        return cv::Mat::zeros(h, w, CV_8UC1);
+    }
+
+    // Run k-means clustering
+    // 运行 k-means 聚类
+    cv::Mat sampleMat(static_cast<int>(samples.size()), 4, CV_32F);
+    for (size_t i = 0; i < samples.size(); i++) {
+        float* row = sampleMat.ptr<float>(static_cast<int>(i));
+        row[0] = samples[i][0];
+        row[1] = samples[i][1];
+        row[2] = samples[i][2];
+        row[3] = samples[i][3];
+    }
+
+    cv::Mat labels, centers;
+    cv::kmeans(sampleMat, k, labels,
+               cv::TermCriteria(cv::TermCriteria::EPS + cv::TermCriteria::COUNT, 100, 1.0),
+               3, cv::KMEANS_PP_CENTERS, centers);
+
+    // Calculate average Y position for each cluster
+    // 计算每个聚类的平均 Y 坐标
+    std::vector<double> avgY(k, 0.0);
+    std::vector<int> count(k, 0);
+    for (int i = 0; i < labels.rows; i++) {
+        int clusterId = labels.at<int>(i);
+        avgY[clusterId] += positions[i].y;
+        count[clusterId]++;
+    }
+    for (int i = 0; i < k; i++) {
+        if (count[i] > 0) avgY[i] /= count[i];
+    }
+
+    // Sort clusters by average Y (top to bottom)
+    // 按平均 Y 坐标排序聚类（从上到下）
+    std::vector<int> clusterOrder(k);
+    for (int i = 0; i < k; i++) clusterOrder[i] = i;
+    std::sort(clusterOrder.begin(), clusterOrder.end(),
+              [&avgY](int a, int b) { return avgY[a] < avgY[b]; });
+
+    // Map cluster IDs to part IDs (top=head, bottom=legs)
+    // 将聚类 ID 映射为部件 ID（顶部=头，底部=腿）
+    // Part order: 1=head, 2=body, 3=arm_left, 4=arm_right, 5=leg_left, 6=leg_right
+    std::vector<int> clusterToPart(k);
+    for (int i = 0; i < k; i++) {
+        clusterToPart[clusterOrder[i]] = i + 1;  // map to part 1-6
+    }
+
+    // Build partMap
+    // 构建部件映射
+    cv::Mat partMap = cv::Mat::zeros(h, w, CV_8UC1);
+    for (size_t i = 0; i < positions.size(); i++) {
+        int clusterId = labels.at<int>(static_cast<int>(i));
+        int partId = clusterToPart[clusterId];
+        partMap.at<uchar>(positions[i]) = static_cast<uchar>(partId);
+    }
+
+    std::cout << "Auto detection complete / 自动检测完成:" << std::endl;
+    for (int i = 0; i < k; i++) {
+        int partId = clusterToPart[i];
+        std::cout << "  Cluster " << i << " -> " << getPartName(partId)
+                  << " (avg Y: " << static_cast<int>(avgY[i])
+                  << ", pixels: " << count[i] << ")" << std::endl;
+    }
+
+    return partMap;
 }
 
 int runExtractPartsMode() {
@@ -139,59 +289,111 @@ int runExtractPartsMode() {
 
     std::cout << "Image loaded: " << img.cols << "x" << img.rows << std::endl;
 
+    // Ask for detection mode
+    // 询问检测模式
+    std::cout << "\nDetection mode / 检测模式:" << std::endl;
+    std::cout << "  1. Manual (fully manual painting) / 完全手动" << std::endl;
+    std::cout << "  2. Auto detect (k-means clustering) / 自动检测" << std::endl;
+    std::cout << "  3. Auto + refine (auto detect, then manual edit) / 自动 + 人工微调" << std::endl;
+    std::cout << "Enter choice (1/2/3, default: 3): ";
+    std::string modeInput;
+    std::getline(std::cin, modeInput);
+
+    int mode = 3;  // default: auto + refine
+    if (!modeInput.empty()) {
+        try {
+            mode = std::stoi(modeInput);
+            if (mode < 1 || mode > 3) {
+                std::cerr << "Error: Invalid choice. Using default (3)." << std::endl;
+                mode = 3;
+            }
+        } catch (...) {
+            std::cerr << "Error: Invalid input. Using default (3)." << std::endl;
+            mode = 3;
+        }
+    }
+
     // Initialize editor state
     // 初始化编辑器状态
     EditorState state;
     state.originalImage = img;
     state.partMap = cv::Mat::zeros(img.rows, img.cols, CV_8UC1);
 
-    // Print controls
-    // 打印操作说明
-    std::cout << "\nEditor Controls / 编辑器控制:" << std::endl;
-    std::cout << "  1-6     - Select part / 选择部件" << std::endl;
-    for (const auto& p : PARTS) {
-        std::cout << "           " << p.id << " = " << p.name << std::endl;
-    }
-    std::cout << "  Left    - Paint cell / 左键涂色" << std::endl;
-    std::cout << "  Right   - Erase cell / 右键擦除" << std::endl;
-    std::cout << "  Enter   - Confirm & extract / 确认并提取" << std::endl;
-    std::cout << "  ESC     - Cancel / 取消" << std::endl;
-    std::cout << "\nCurrent part: " << getPartName(state.currentPart) << std::endl;
-
-    // Create window and set mouse callback
-    // 创建窗口并设置鼠标回调
-    const std::string windowName = "Body Part Editor";
-    cv::namedWindow(windowName, cv::WINDOW_AUTOSIZE);
-    cv::setMouseCallback(windowName, onMouse, &state);
-
-    // Editor loop
-    // 编辑器循环
-    while (true) {
-        if (state.needsRedraw) {
-            cv::Mat display = buildDisplayImage(state);
-            cv::imshow(windowName, display);
-            state.needsRedraw = false;
-        }
-
-        int key = cv::waitKey(16) & 0xFF;  // ~60 FPS
-
-        if (key == 27) {
-            // ESC to cancel / ESC 取消
-            std::cout << "Cancelled / 已取消" << std::endl;
-            cv::destroyAllWindows();
-            return 0;
-        } else if (key == 13 || key == 10) {
-            // Enter to confirm / 回车确认
-            break;
-        } else if (key >= '1' && key <= '6') {
-            // Number key to select part / 数字键选择部件
-            state.currentPart = key - '0';
-            state.needsRedraw = true;
-            std::cout << "Selected part: " << getPartName(state.currentPart) << std::endl;
-        }
+    // Auto detect if mode 2 or 3
+    // 模式 2 或 3 时进行自动检测
+    if (mode == 2 || mode == 3) {
+        std::cout << "\nRunning auto detection... / 正在自动检测..." << std::endl;
+        state.partMap = autoDetectParts(img);
+        state.needsRedraw = true;
     }
 
-    cv::destroyAllWindows();
+    // Mode 1 and 3: open editor for manual painting/refinement
+    // 模式 1 和 3：打开编辑器进行手动涂色/微调
+    if (mode == 1 || mode == 3) {
+        // Print controls
+        // 打印操作说明
+        std::cout << "\nEditor Controls / 编辑器控制:" << std::endl;
+        std::cout << "  1-6     - Select part & paint mode / 选择部件 & 涂色模式" << std::endl;
+        for (const auto& p : PARTS) {
+            std::cout << "           " << p.id << " = " << p.name << std::endl;
+        }
+        std::cout << "  7       - Eraser (only erases selected part) / 橡皮（仅擦除选中部件）" << std::endl;
+        std::cout << "  Left    - Paint or erase (drag supported) / 左键涂色或擦除（支持拖拽）" << std::endl;
+        std::cout << "  Enter   - Confirm & extract / 确认并提取" << std::endl;
+        std::cout << "  ESC     - Cancel / 取消" << std::endl;
+        if (mode == 3) {
+            std::cout << "\n  [Auto detected parts loaded. Refine as needed. / 已加载自动检测结果，可微调。]" << std::endl;
+        }
+        std::cout << "\nCurrent part: " << getPartName(state.currentPart) << std::endl;
+
+        // Create window and set mouse callback
+        // 创建窗口并设置鼠标回调
+        const std::string windowName = "Body Part Editor";
+        cv::namedWindow(windowName, cv::WINDOW_AUTOSIZE);
+        cv::setMouseCallback(windowName, onMouse, &state);
+
+        // Editor loop
+        // 编辑器循环
+        while (true) {
+            if (state.needsRedraw) {
+                cv::Mat display = buildDisplayImage(state);
+                cv::imshow(windowName, display);
+                state.needsRedraw = false;
+            }
+
+            int key = cv::waitKey(16) & 0xFF;  // ~60 FPS
+
+            if (key == 27) {
+                // ESC to cancel / ESC 取消
+                std::cout << "Cancelled / 已取消" << std::endl;
+                cv::destroyAllWindows();
+                return 0;
+            } else if (key == 13 || key == 10) {
+                // Enter to confirm / 回车确认
+                break;
+            } else if (key >= '1' && key <= '6') {
+                // Number key to select part / 数字键选择部件
+                state.currentPart = key - '0';
+                state.mode = 0;  // paint mode / 涂色模式
+                state.needsRedraw = true;
+                std::cout << "Selected part: " << getPartName(state.currentPart) << std::endl;
+            } else if (key == '7') {
+                // Eraser: set to eraser mode, target = current part
+                // 橡皮：切换到橡皮模式，目标 = 当前部件
+                state.mode = 1;
+                state.eraserTarget = state.currentPart;
+                state.needsRedraw = true;
+                std::cout << "Eraser mode (erase: " << getPartName(state.eraserTarget)
+                          << ") / 橡皮模式（擦除: " << getPartName(state.eraserTarget) << "）" << std::endl;
+            }
+        }
+
+        cv::destroyAllWindows();
+    } else {
+        // Mode 2: auto detect only
+        // 模式 2：仅自动检测
+        std::cout << "Auto detection done. / 自动检测完成。" << std::endl;
+    }
 
     // Check if any parts were assigned
     // 检查是否有部件被分配

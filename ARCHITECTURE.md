@@ -72,10 +72,11 @@ Grid-based editor for marking and extracting body parts from a single image.
 
 | Symbol | Type | Description |
 |----------|------|-------------|
-| `EditorState` | struct | Editor state: partMap (pixel→partID), currentPart, zoomFactor, needsRedraw, originalImage. 编辑器状态：部件映射、当前部件、缩放倍数、是否需要重绘、原始图片。 |
+| `EditorState` | struct | Editor state: partMap (pixel→partID), currentPart (1-6), mode (0=paint, 1=eraser), eraserTarget, zoomFactor, needsRedraw, originalImage. 编辑器状态：部件映射、当前部件、模式、橡皮目标、缩放倍数、是否需要重绘、原始图片。 |
 | `onMouse()` | function (static) | Mouse callback: left click/drag assigns current part, right click/drag erases. Converts display coords to image coords. 鼠标回调：左键涂色、右键擦除，坐标转换。 |
 | `buildDisplayImage()` | function (static) | Builds display image: scales up original, overlays semi-transparent part colors, draws grid lines. 构建显示图片：放大原图、叠加半透明部件颜色、绘制网格线。 |
-| `runExtractPartsMode()` | Main function for Mode 2. Handles: image loading, editor loop (mouse + keyboard), part extraction (mask + crop), save as transparent PNGs. 模式二主函数：图片加载、编辑器循环、部件提取（掩膜+裁切）、保存为透明 PNG。 |
+| `autoDetectParts()` | function | Auto detect body parts using k-means color clustering. Groups non-transparent pixels by color, maps clusters to parts by vertical position (top=head, bottom=legs). 使用 k-means 颜色聚类自动检测身体部件，按垂直位置映射。 |
+| `runExtractPartsMode()` | Main function for Mode 2. Handles: image loading, detection mode selection (manual/auto/auto+refine), editor loop, part extraction, save as transparent PNGs. 模式二主函数：图片加载、检测模式选择、编辑器循环、部件提取、保存。 |
 
 **Internal flow / 内部流程:**
 1. Ask image path, load as BGRA / 询问路径，加载为 BGRA
@@ -99,6 +100,7 @@ Grid-based editor for marking and extracting body parts from a single image.
 | `cv::addWeighted` | extractor | Blend overlay with image / 混合覆盖层 |
 | `cv::findContours` | extractor | Find contours for bounding box / 查找轮廓获取边界框 |
 | `cv::bitwise_and` | extractor | Apply mask to extract part / 应用掩膜提取部件 |
+| `cv::kmeans` | extractor | Color clustering for auto detection / 颜色聚类自动检测 |
 
 ## Version History / 版本历史
 
@@ -109,3 +111,7 @@ Grid-based editor for marking and extracting body parts from a single image.
 | V0.3 | Animation preview / 动画预览 |
 | V0.4 | Body part extraction via grid editor / 格子编辑器部件提取 |
 | V0.4.1 | Code modularization / 代码模块化 |
+| V0.4.2 | Auto detection (k-means) + manual refinement / 自动检测 + 人工微调 |
+| V0.4.3 | Editor UX: white bg, eraser, highlight current part / 编辑器 UX 改进 |
+| V0.4.4 | Editor display fix: original visible, smart eraser / 编辑器显示修复 |
+| V0.4.5 | Editor visibility: colored border + cross for selected cells / 编辑器可见性改进 |
