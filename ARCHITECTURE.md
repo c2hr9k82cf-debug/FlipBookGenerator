@@ -72,9 +72,10 @@ Grid-based editor for marking and extracting body parts from a single image.
 
 | Symbol | Type | Description |
 |----------|------|-------------|
-| `EditorState` | struct | Editor state: partMap (pixel→partID), currentPart (1-6), mode (0=paint, 1=eraser), eraserTarget, zoomFactor, needsRedraw, originalImage. 编辑器状态：部件映射、当前部件、模式、橡皮目标、缩放倍数、是否需要重绘、原始图片。 |
-| `onMouse()` | function (static) | Mouse callback: left click/drag assigns current part, right click/drag erases. Converts display coords to image coords. 鼠标回调：左键涂色、右键擦除，坐标转换。 |
-| `buildDisplayImage()` | function (static) | Builds display image: scales up original, overlays semi-transparent part colors, draws grid lines. 构建显示图片：放大原图、叠加半透明部件颜色、绘制网格线。 |
+| `EditorState` | struct | Editor state: partMap (pixel→partID), currentPart (1-6), mode (0=paint, 1=eraser, 2=overview), eraserTarget, zoomFactor, needsRedraw, originalImage. 编辑器状态：部件映射、当前部件、模式（涂色/橡皮/总览）、橡皮目标、缩放倍数、是否需要重绘、原始图片。 |
+| `onMouse()` | function (static) | Mouse callback: left click/drag to paint or erase (eraser only erases target part). Converts display coords to image coords. 鼠标回调：左键涂色/擦除（橡皮仅擦除目标部件），坐标转换。 |
+| `buildDisplayImage()` | function (static) | Builds display image: original image visible, light gray bg for transparent areas, light blue-gray overlay for assigned cells, colored border + cross for selected cells. 构建显示图片：原图可见、透明区域浅灰背景、已分配格子浅蓝灰覆盖、选中格子彩色边框+十字。 |
+| `buildOverviewImage()` | function (static) | Builds overview image: original image + colored boundary outlines for all parts (no fill). 构建总览图片：原图 + 所有部件的彩色边界轮廓（无填充）。 |
 | `autoDetectParts()` | function | Auto detect body parts using k-means color clustering. Groups non-transparent pixels by color, maps clusters to parts by vertical position (top=head, bottom=legs). 使用 k-means 颜色聚类自动检测身体部件，按垂直位置映射。 |
 | `runExtractPartsMode()` | Main function for Mode 2. Handles: image loading, detection mode selection (manual/auto/auto+refine), editor loop, part extraction, save as transparent PNGs. 模式二主函数：图片加载、检测模式选择、编辑器循环、部件提取、保存。 |
 
