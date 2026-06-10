@@ -5,7 +5,7 @@ Animation resource generation tool for indie game developers.
 
 ## Current Version / 当前版本
 
-V0.4.5
+V0.4.6
 
 ## Completed Features / 已完成功能
 
@@ -29,6 +29,8 @@ V0.4.5
   编辑器显示修复 — 原图可见、浅灰背景、统一覆盖层、橡皮仅擦除选中部件
 - V0.4.5: Editor visibility — colored grid border + center cross for selected cells
   编辑器可见性 — 选中格子彩色边框 + 中心十字标记
+- V0.4.6: Thinner selection border, overview mode (key 9) showing all part boundaries
+  更细的选中边框，总览模式（按键 9）显示所有部件边界
 
 ## Roadmap / 版本路线图
 

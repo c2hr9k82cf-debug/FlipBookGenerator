@@ -16,7 +16,7 @@ namespace fs = std::filesystem;
 struct EditorState {
     cv::Mat partMap;       // each pixel stores part ID (0=unassigned) / 每像素存储部件 ID
     int currentPart = 1;   // currently selected part (1-6) / 当前选中部件 (1-6)
-    int mode = 0;          // 0=paint, 1=eraser / 0=涂色, 1=橡皮
+    int mode = 0;          // 0=paint, 1=eraser, 2=overview / 0=涂色, 1=橡皮, 2=总览
     int eraserTarget = 1;  // which part eraser can erase / 橡皮可擦除的部件
     int zoomFactor = 8;    // display zoom / 显示缩放
     bool needsRedraw = true;
@@ -156,19 +156,98 @@ static cv::Mat buildDisplayImage(const EditorState& state) {
             if (isSelected) {
                 cv::Rect cell(x * z, y * z, z, z);
 
-                // Draw thick colored border / 绘制粗彩色边框
-                cv::rectangle(display, cell, highlightColor, 2);
+                // Draw thin colored border / 绘制细彩色边框
+                cv::rectangle(display, cell, highlightColor, 1);
 
                 // Draw cross in center / 绘制中心十字
                 int cx = x * z + z / 2;
                 int cy = y * z + z / 2;
-                int crossLen = z / 3;
+                int crossLen = z / 4;
                 cv::line(display, cv::Point(cx - crossLen, cy), cv::Point(cx + crossLen, cy),
-                         highlightColor, 2);
+                         highlightColor, 1);
                 cv::line(display, cv::Point(cx, cy - crossLen), cv::Point(cx, cy + crossLen),
-                         highlightColor, 2);
+                         highlightColor, 1);
             }
         }
+    }
+
+    return display;
+}
+
+// Build overview image: original + colored borders for all parts
+// 构建总览图片：原始图 + 所有部件的彩色边框
+static cv::Mat buildOverviewImage(const EditorState& state) {
+    int w = state.originalImage.cols;
+    int h = state.originalImage.rows;
+    int z = state.zoomFactor;
+
+    // Scale up original image
+    // 放大原始图片
+    cv::Mat scaled;
+    cv::resize(state.originalImage, scaled, cv::Size(w * z, h * z), 0, 0, cv::INTER_NEAREST);
+
+    // Convert to BGR
+    // 转换为 BGR
+    cv::Mat display;
+    if (scaled.channels() == 4) {
+        cv::cvtColor(scaled, display, cv::COLOR_BGRA2BGR);
+    } else if (scaled.channels() == 1) {
+        cv::cvtColor(scaled, display, cv::COLOR_GRAY2BGR);
+    } else {
+        display = scaled.clone();
+    }
+
+    // Light gray background behind transparent areas
+    // 透明区域显示浅灰背景
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            cv::Vec4b pixel = state.originalImage.at<cv::Vec4b>(y, x);
+            if (pixel[3] == 0) {
+                cv::Rect cell(x * z, y * z, z, z);
+                cv::rectangle(display, cell, cv::Scalar(230, 230, 230), cv::FILLED);
+            }
+        }
+    }
+
+    // For each part, find boundary pixels and draw colored border
+    // 对每个部件，找到边界像素并绘制彩色边框
+    for (const auto& part : PARTS) {
+        // Create mask for this part
+        // 创建此部件的掩膜
+        cv::Mat mask = (state.partMap == part.id);
+        if (cv::countNonZero(mask) == 0) continue;
+
+        // Find boundary: pixel belongs to part but has a neighbor that doesn't
+        // 找边界：属于此部件但有邻居不属于
+        cv::Scalar color = part.color;
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                if (mask.at<uchar>(y, x) == 0) continue;
+
+                bool isBoundary = false;
+                // Check 4 neighbors / 检查4个邻居
+                if (x == 0 || state.partMap.at<uchar>(y, x - 1) != part.id) isBoundary = true;
+                if (x == w - 1 || state.partMap.at<uchar>(y, x + 1) != part.id) isBoundary = true;
+                if (y == 0 || state.partMap.at<uchar>(y - 1, x) != part.id) isBoundary = true;
+                if (y == h - 1 || state.partMap.at<uchar>(y + 1, x) != part.id) isBoundary = true;
+
+                if (isBoundary) {
+                    // Draw colored border pixel / 绘制彩色边界像素
+                    cv::Rect cell(x * z, y * z, z, z);
+                    cv::rectangle(display, cell, color, 1);
+                }
+            }
+        }
+    }
+
+    // Draw grid lines (very light)
+    // 绘制网格线（非常浅）
+    cv::Scalar gridColor(220, 220, 220);
+    for (int x = 0; x <= w; x++) {
+        cv::line(display, cv::Point(x * z, 0), cv::Point(x * z, h * z), gridColor, 1);
+    }
+    for (int y = 0; y <= h; y++) {
+        cv::line(display, cv::Point(0, y * z), cv::Point(w * z, y * z), gridColor, 1);
     }
 
     return display;
@@ -338,6 +417,7 @@ int runExtractPartsMode() {
             std::cout << "           " << p.id << " = " << p.name << std::endl;
         }
         std::cout << "  7       - Eraser (only erases selected part) / 橡皮（仅擦除选中部件）" << std::endl;
+        std::cout << "  9       - Overview (show all parts) / 总览（显示所有部件）" << std::endl;
         std::cout << "  Left    - Paint or erase (drag supported) / 左键涂色或擦除（支持拖拽）" << std::endl;
         std::cout << "  Enter   - Confirm & extract / 确认并提取" << std::endl;
         std::cout << "  ESC     - Cancel / 取消" << std::endl;
@@ -356,7 +436,14 @@ int runExtractPartsMode() {
         // 编辑器循环
         while (true) {
             if (state.needsRedraw) {
-                cv::Mat display = buildDisplayImage(state);
+                cv::Mat display;
+                if (state.mode == 2) {
+                    // Overview mode: show all part borders / 总览模式：显示所有部件边框
+                    display = buildOverviewImage(state);
+                } else {
+                    // Normal mode: show current part highlight / 普通模式：显示当前部件高亮
+                    display = buildDisplayImage(state);
+                }
                 cv::imshow(windowName, display);
                 state.needsRedraw = false;
             }
@@ -385,6 +472,16 @@ int runExtractPartsMode() {
                 state.needsRedraw = true;
                 std::cout << "Eraser mode (erase: " << getPartName(state.eraserTarget)
                           << ") / 橡皮模式（擦除: " << getPartName(state.eraserTarget) << "）" << std::endl;
+            } else if (key == '9') {
+                // Overview: toggle overview mode / 总览：切换总览模式
+                if (state.mode == 2) {
+                    state.mode = 0;  // back to paint / 返回涂色模式
+                    std::cout << "Exit overview / 退出总览" << std::endl;
+                } else {
+                    state.mode = 2;
+                    std::cout << "Overview mode (press 9 to exit) / 总览模式（按 9 退出）" << std::endl;
+                }
+                state.needsRedraw = true;
             }
         }
 

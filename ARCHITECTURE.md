@@ -115,3 +115,4 @@ Grid-based editor for marking and extracting body parts from a single image.
 | V0.4.3 | Editor UX: white bg, eraser, highlight current part / 编辑器 UX 改进 |
 | V0.4.4 | Editor display fix: original visible, smart eraser / 编辑器显示修复 |
 | V0.4.5 | Editor visibility: colored border + cross for selected cells / 编辑器可见性改进 |
+| V0.4.6 | Thinner border, overview mode (key 9) / 更细边框、总览模式 |
