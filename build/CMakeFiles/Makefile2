@@ -85,12 +85,12 @@ clean: CMakeFiles/flipbook.dir/clean
 CMakeFiles/flipbook.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/flipbook.dir/build.make CMakeFiles/flipbook.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/flipbook.dir/build.make CMakeFiles/flipbook.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/lin/Projects/FlipBookGenerator/build/CMakeFiles --progress-num=1,2 "Built target flipbook"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/lin/Projects/FlipBookGenerator/build/CMakeFiles --progress-num=1,2,3,4,5 "Built target flipbook"
 .PHONY : CMakeFiles/flipbook.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/flipbook.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /Users/lin/Projects/FlipBookGenerator/build/CMakeFiles 2
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/lin/Projects/FlipBookGenerator/build/CMakeFiles 5
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/flipbook.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /Users/lin/Projects/FlipBookGenerator/build/CMakeFiles 0
 .PHONY : CMakeFiles/flipbook.dir/rule
@@ -102,7 +102,7 @@ flipbook: CMakeFiles/flipbook.dir/rule
 # codegen rule for target.
 CMakeFiles/flipbook.dir/codegen:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/flipbook.dir/build.make CMakeFiles/flipbook.dir/codegen
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/lin/Projects/FlipBookGenerator/build/CMakeFiles --progress-num=1,2 "Finished codegen for target flipbook"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/lin/Projects/FlipBookGenerator/build/CMakeFiles --progress-num=1,2,3,4,5 "Finished codegen for target flipbook"
 .PHONY : CMakeFiles/flipbook.dir/codegen
 
 # clean rule for target.

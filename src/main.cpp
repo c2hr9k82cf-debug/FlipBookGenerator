@@ -22,7 +22,7 @@ int main() {
     if (choice == "1") {
         return runSpriteSheetMode();
     } else if (choice == "2") {
-        return runExtractPartsMode();
+        return runExtractPartsMode(); 
     } else {
         std::cerr << "Error: Invalid choice. Please enter 1 or 2." << std::endl;
         return 1;

@@ -86,14 +86,62 @@ CMakeFiles/flipbook.dir/src/main.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/flipbook.dir/src/main.cpp.s"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /Users/lin/Projects/FlipBookGenerator/src/main.cpp -o CMakeFiles/flipbook.dir/src/main.cpp.s
 
+CMakeFiles/flipbook.dir/src/utils.cpp.o: CMakeFiles/flipbook.dir/flags.make
+CMakeFiles/flipbook.dir/src/utils.cpp.o: /Users/lin/Projects/FlipBookGenerator/src/utils.cpp
+CMakeFiles/flipbook.dir/src/utils.cpp.o: CMakeFiles/flipbook.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/lin/Projects/FlipBookGenerator/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object CMakeFiles/flipbook.dir/src/utils.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/flipbook.dir/src/utils.cpp.o -MF CMakeFiles/flipbook.dir/src/utils.cpp.o.d -o CMakeFiles/flipbook.dir/src/utils.cpp.o -c /Users/lin/Projects/FlipBookGenerator/src/utils.cpp
+
+CMakeFiles/flipbook.dir/src/utils.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/flipbook.dir/src/utils.cpp.i"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /Users/lin/Projects/FlipBookGenerator/src/utils.cpp > CMakeFiles/flipbook.dir/src/utils.cpp.i
+
+CMakeFiles/flipbook.dir/src/utils.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/flipbook.dir/src/utils.cpp.s"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /Users/lin/Projects/FlipBookGenerator/src/utils.cpp -o CMakeFiles/flipbook.dir/src/utils.cpp.s
+
+CMakeFiles/flipbook.dir/src/spritesheet.cpp.o: CMakeFiles/flipbook.dir/flags.make
+CMakeFiles/flipbook.dir/src/spritesheet.cpp.o: /Users/lin/Projects/FlipBookGenerator/src/spritesheet.cpp
+CMakeFiles/flipbook.dir/src/spritesheet.cpp.o: CMakeFiles/flipbook.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/lin/Projects/FlipBookGenerator/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object CMakeFiles/flipbook.dir/src/spritesheet.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/flipbook.dir/src/spritesheet.cpp.o -MF CMakeFiles/flipbook.dir/src/spritesheet.cpp.o.d -o CMakeFiles/flipbook.dir/src/spritesheet.cpp.o -c /Users/lin/Projects/FlipBookGenerator/src/spritesheet.cpp
+
+CMakeFiles/flipbook.dir/src/spritesheet.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/flipbook.dir/src/spritesheet.cpp.i"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /Users/lin/Projects/FlipBookGenerator/src/spritesheet.cpp > CMakeFiles/flipbook.dir/src/spritesheet.cpp.i
+
+CMakeFiles/flipbook.dir/src/spritesheet.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/flipbook.dir/src/spritesheet.cpp.s"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /Users/lin/Projects/FlipBookGenerator/src/spritesheet.cpp -o CMakeFiles/flipbook.dir/src/spritesheet.cpp.s
+
+CMakeFiles/flipbook.dir/src/extractor.cpp.o: CMakeFiles/flipbook.dir/flags.make
+CMakeFiles/flipbook.dir/src/extractor.cpp.o: /Users/lin/Projects/FlipBookGenerator/src/extractor.cpp
+CMakeFiles/flipbook.dir/src/extractor.cpp.o: CMakeFiles/flipbook.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/lin/Projects/FlipBookGenerator/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object CMakeFiles/flipbook.dir/src/extractor.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/flipbook.dir/src/extractor.cpp.o -MF CMakeFiles/flipbook.dir/src/extractor.cpp.o.d -o CMakeFiles/flipbook.dir/src/extractor.cpp.o -c /Users/lin/Projects/FlipBookGenerator/src/extractor.cpp
+
+CMakeFiles/flipbook.dir/src/extractor.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/flipbook.dir/src/extractor.cpp.i"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /Users/lin/Projects/FlipBookGenerator/src/extractor.cpp > CMakeFiles/flipbook.dir/src/extractor.cpp.i
+
+CMakeFiles/flipbook.dir/src/extractor.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/flipbook.dir/src/extractor.cpp.s"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /Users/lin/Projects/FlipBookGenerator/src/extractor.cpp -o CMakeFiles/flipbook.dir/src/extractor.cpp.s
+
 # Object files for target flipbook
 flipbook_OBJECTS = \
-"CMakeFiles/flipbook.dir/src/main.cpp.o"
+"CMakeFiles/flipbook.dir/src/main.cpp.o" \
+"CMakeFiles/flipbook.dir/src/utils.cpp.o" \
+"CMakeFiles/flipbook.dir/src/spritesheet.cpp.o" \
+"CMakeFiles/flipbook.dir/src/extractor.cpp.o"
 
 # External object files for target flipbook
 flipbook_EXTERNAL_OBJECTS =
 
 flipbook: CMakeFiles/flipbook.dir/src/main.cpp.o
+flipbook: CMakeFiles/flipbook.dir/src/utils.cpp.o
+flipbook: CMakeFiles/flipbook.dir/src/spritesheet.cpp.o
+flipbook: CMakeFiles/flipbook.dir/src/extractor.cpp.o
 flipbook: CMakeFiles/flipbook.dir/build.make
 flipbook: /opt/homebrew/lib/libopencv_gapi.4.13.0.dylib
 flipbook: /opt/homebrew/lib/libopencv_stitching.4.13.0.dylib
@@ -152,7 +200,7 @@ flipbook: /opt/homebrew/lib/libopencv_photo.4.13.0.dylib
 flipbook: /opt/homebrew/lib/libopencv_imgproc.4.13.0.dylib
 flipbook: /opt/homebrew/lib/libopencv_core.4.13.0.dylib
 flipbook: CMakeFiles/flipbook.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/Users/lin/Projects/FlipBookGenerator/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Linking CXX executable flipbook"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/Users/lin/Projects/FlipBookGenerator/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Linking CXX executable flipbook"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/flipbook.dir/link.txt --verbose=$(VERBOSE)
 
 # Rule to build all files generated by this target.
