@@ -5,7 +5,7 @@ Animation resource generation tool for indie game developers.
 
 ## Current Version / 当前版本
 
-V0.3
+V0.4.1
 
 ## Completed Features / 已完成功能
 
@@ -17,22 +17,17 @@ V0.3
   运行时询问目标帧尺寸（默认 32），按比例缩放适配
 - V0.3: Animation preview with adjustable FPS, pause/resume, step-through controls
   动画预览，支持帧率调节、暂停/继续、逐帧播放
+- V0.4: Body part extraction via grid-based editor, mouse painting with 6 fixed parts (head, body, arms, legs)
+  身体部件提取，格子编辑器，鼠标涂色，6 个固定部件（头、躯干、手臂、腿）
+- V0.4.1: Code modularization — split main.cpp into utils, spritesheet, extractor modules
+  代码模块化 — 将 main.cpp 拆分为 utils、spritesheet、extractor 模块
 
 ## Roadmap / 版本路线图
 
-### V0.4: Body Part Extraction / 身体部件提取
+### V0.4: Body Part Extraction / 身体部件提取 ✅
 
-Load a single character image (pixel art), use grid-based manual division or auto contour detection to extract body parts (head, body, arms, legs) as separate PNG layers.
-加载单张角色图（像素风），通过格子人工划分或自动轮廓检测，提取身体部件（头、躯干、手臂、腿）为独立 PNG 图层。
-
-- Grid overlay with mouse interaction for manual part assignment
-  网格覆盖 + 鼠标交互，人工标记部件归属
-- Auto detect mode using color clustering (k-means) or contour detection
-  自动检测模式：颜色聚类或轮廓检测
-- Auto + manual refine mode (auto first, then manual correction)
-  自动 + 人工微调模式
-- Export each body part as transparent PNG
-  导出每个部件为透明 PNG
+Load a single character image (pixel art), use grid-based manual division to extract body parts (head, body, arms, legs) as separate PNG layers.
+加载单张角色图（像素风），通过格子人工划分，提取身体部件（头、躯干、手臂、腿）为独立 PNG 图层。
 
 ### V0.5: Skeleton & Pose Definition / 骨骼与姿势定义
 
@@ -101,7 +96,10 @@ FlipBookGenerator/
 ├── CLAUDE.md           # Project documentation / 项目记录
 ├── CMakeLists.txt      # Build config / 构建配置
 ├── src/
-│   └── main.cpp        # Main program / 主程序
+│   ├── main.cpp        # Entry point + mode selection / 入口 + 模式选择
+│   ├── utils.h/cpp     # Common definitions / 公共定义
+│   ├── spritesheet.h/cpp # Sprite sheet generation / Sprite Sheet 生成
+│   └── extractor.h/cpp # Body part extraction / 身体部件提取
 ├── assets/             # Input images / 输入图片
 └── output/             # Output directory / 输出目录
 ```
