@@ -33,94 +33,66 @@ import struct
 import zlib
 
 # ---------------------------------------------------------------------------
-# Palette / 配色 — exact RGB from reference sheet / 参考图精确 RGB
+# Single source of truth / 唯一来源
+#
+# The pixel map lives in assets/templates/chibi_standard_pixels.txt and the
+# palette + part ownership in assets/templates/chibi_standard.json. Nothing
+# about the character is duplicated here: reskinning means editing those two
+# files, and every tool that renders the template (this one,
+# make_review_sheet.py, the view extractors) reads the same pair.
+# 像素图在 assets/templates/chibi_standard_pixels.txt，调色板与部件归属在
+# assets/templates/chibi_standard.json。角色数据在此处零重复：换皮就是改那两个
+# 文件，所有渲染模版的工具（本工具、make_review_sheet.py、视图提取器）
+# 读的是同一对文件。
 # ---------------------------------------------------------------------------
 
-OUT   = (46, 34, 47)       # outline / 描边
-HAIR1 = (247, 150, 23)     # hair mid / 头发中调
-HAIR2 = (251, 107, 29)     # hair dark / 头发暗部
-HAIR3 = (249, 194, 43)     # hair highlight / 头发高光
-SKIN  = (253, 203, 176)    # skin / 皮肤
-SKIN2 = (252, 167, 144)    # blush / 腮红
-TAN   = (230, 144, 78)     # tan / 棕色
-MINT  = (199, 220, 208)    # mint / 薄荷绿
-WHITE = (255, 255, 255)    # white / 白色
-RED   = (232, 59, 59)      # red / 红色
-PANT  = (205, 104, 61)     # pants / 裤子
-GREY  = (155, 171, 178)    # grey / 灰色
-GREY2 = (127, 112, 138)    # grey dark / 深灰
-TEAL  = (22, 90, 76)       # teal / 青色
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-MAP = {
-    '.': None,
-    '@': OUT,
-    'h': HAIR1, 'H': HAIR2, 'y': HAIR3,
-    's': SKIN,  'b': SKIN2, 't': TAN,
-    'm': MINT,  'w': WHITE, 'r': RED,
-    'p': PANT,  'g': GREY,  'G': GREY2,
-    'T': TEAL,
-}
 
-# ---------------------------------------------------------------------------
-# The art / 画面 — pixel-exact from reference cell (0,0)
-# 14 columns wide (x9..x22), 30 rows tall (y2..y31).
-# 每行 14 列（x9..x22），共 30 行（y2..y31）。逐像素取自参考图 (0,0) 格。
-# ---------------------------------------------------------------------------
+def load_template():
+    """(art rows, char -> RGB-or-None, spec) from the two template files.
+    从那两个模版文件得到（像素行列表，字符 -> RGB 或 None，spec）。"""
+    import json
+    with open(os.path.join(ROOT, 'assets', 'templates', 'chibi_standard.json')) as f:
+        spec = json.load(f)
+    palette = {k: tuple(v) for k, v in spec['palette'].items()}
+    # palette_chars maps a character to a palette ROLE name ('.' -> None for
+    # transparent). palette holds plain RGB; nothing on this path is BGR.
+    # palette_chars 把字符映射到调色板【角色名】（'.' -> None 表示透明）。
+    # palette 存的是纯 RGB，这条路径上没有 BGR。
+    char_map = spec['palette_chars']
+    rgb = {ch: (palette[role] if role else None) for ch, role in char_map.items()}
 
-ART = [
-    '....@@@@@@....',   # y2   crown / 头发顶
-    '...@yhyyhy@...',   # y3   highlight streak / 高光条
-    '..@yhhhhhhy@..',   # y4   mid fills / 中调填充
-    '.@HhhHhhhhhH@.',   # y5   highlight continues / 高光延续
-    '.HhhHbHHHHhh@.',   # y6   dark hair, blush hint / 暗发，腮红暗示
-    'HHhH@@bb@@HhH@',   # y7   fringe, eyebrows / 刘海，眉毛
-    '@HH@mTssTm@hhH',   # y8   eyes (T=iris) / 眼睛
-    '@HHbw@ss@wbHhH',   # y9   eyes 2nd row / 眼睛第二行
-    '@HHrssssssrHH.',   # y10  cheeks / 腮红
-    '@HHHrssssrHH..',   # y11  mouth / 嘴
-    '@HHHrrbbrrHH..',   # y12  chin / 下巴
-    '.H@@mgssgm@@..',   # y13  neck + collar / 颈与领
-    '.@ssmmggmmss@.',   # y14  chest / 胸
-    '.@sbmwmmwmbs@.',   # y15  chest / 胸
-    '@sbmwwwwwwmbs@',   # y16  chest / 胸
-    '@sbmwwwwwwmbs@',   # y17  chest / 胸
-    '@sbmmmmmmmmbs@',   # y18  belt / 腰带
-    '@ssbmmmmmmbss@',   # y19  below belt / 腰带下
-    '@sss@@@@@@sss@',   # y20  waistline / 腰线
-    '.@b@pppptt@b@.',   # y21  hips / 胯
-    '.@spppppttts@.',   # y22  thighs / 大腿
-    '..@pppptttt@..',   # y23  legs / 腿
-    '...@pp@@tt@...',   # y24  legs, seam / 腿，缝
-    '...@pp@@tt@...',   # y25  legs / 腿
-    '..@pp@.@tt@...',   # y26  boot tops / 靴筒
-    '..@pp@.@tt@...',   # y27  boots / 靴
-    '..@@@@.@@@@...',   # y28  boot soles / 靴底
-    '..@GG@.@gg@...',   # y29  boot detail / 靴细节
-    '.@GGG@.@ggg@..',   # y30  boot flare / 靴外扩
-    '.@@@@...@@@...',   # y31  soles / 靴底
-]
+    rows = []
+    with open(os.path.join(ROOT, 'assets', 'templates', 'chibi_standard_pixels.txt')) as f:
+        for line in f:
+            line = line.rstrip('\n')
+            if not line or line.lstrip().startswith('#'):
+                continue
+            rows.append(line)
+    return rows, rgb, spec
+
+
+ART, MAP, SPEC = load_template()
 
 # ---------------------------------------------------------------------------
 # Part ownership / 部件归属
 #
 # Every opaque pixel belongs to exactly ONE part, which is what makes the
-# reconstruction invariant hold by construction.
-# 每个不透明像素只属于【一个】部件 —— 重建不变量因此构造性成立。
+# reconstruction invariant hold by construction. The split itself lives in
+# the template's part_map (absolute image coords) — not here — so a reskin or
+# a new view can redefine it without touching this script.
+# 每个不透明像素只属于【一个】部件 —— 重建不变量因此构造性成立。划分本身在
+# 模版的 part_map（绝对图像坐标）里，不在这里 —— 换皮或新增视图都能重定义它，
+# 不必改本脚本。
 #
-#   1 head       y2..y12   (ART rows 0..10)   whole width / 整宽
-#   2 body       y13..y20  (ART rows 11..18)  centre cols 3..10
-#   3 arm_left   y13..y20  cols 0..2 / 列 0..2
-#   4 arm_right  y13..y20  cols 11..13 / 列 11..13
-#   5 leg_left   y21..y31  (ART rows 19..29)  cols 0..6 / 列 0..6
-#   6 leg_right  y21..y31  cols 7..13 / 列 7..13
+#   1 head       y2..y12   whole width / 整宽
+#   2 body       y13..y20  centre columns / 中间列
+#   3 arm_left   y13..y20  x9..x11
+#   4 arm_right  y13..y20  x20..x22
+#   5 leg_left   y21..y31  x9..x15
+#   6 leg_right  y21..y31  x16..x21
 # ---------------------------------------------------------------------------
-
-HEAD_ROWS = (0, 10)      # ART indices for y2..y12 (11 rows) / 头 11 行
-TORSO_ROWS = (11, 18)    # ART indices for y13..y20 (8 rows) / 身体 8 行
-LEG_ROWS = (19, 29)      # ART indices for y21..y31 (11 rows) / 腿 11 行
-ARM_COLS = (0, 2, 11, 13)   # left lo, left hi, right lo, right hi
-BODY_COLS = (3, 10)
-LEG_SPLIT = 7               # cols 0..6 left, 7..13 right
 
 PART_IDS = {  # name -> id, must match src/utils.cpp / 必须与 src/utils.cpp 一致
     'head': 1, 'body': 2, 'arm_left': 3,
@@ -132,17 +104,20 @@ ORIGIN_X, ORIGIN_Y = 9, 2   # 30 rows in 32x32, y2..y31 / 30 行，y2..y31
 
 
 def part_of(row, col):
-    """Which part owns ART[row][col]?  Returns a part name or None."""
-    if HEAD_ROWS[0] <= row <= HEAD_ROWS[1]:
+    """Which part owns this ART pixel?  Returns a part name or None.
+    Ownership comes from the template's part_map, in absolute image coords.
+    这个像素属于哪个部件？归属来自模版的 part_map，用绝对图像坐标。"""
+    pm = SPEC['part_map']
+    y = row + ORIGIN_Y
+    x = col + ORIGIN_X
+    if y in pm['head_rows']:
         return 'head'
-    if TORSO_ROWS[0] <= row <= TORSO_ROWS[1]:
-        if ARM_COLS[0] <= col <= ARM_COLS[1]:
-            return 'arm_left'
-        if ARM_COLS[2] <= col <= ARM_COLS[3]:
-            return 'arm_right'
+    if y in pm['body_rows']:
+        if x in pm['arm_cols']:
+            return 'arm_left' if x <= pm['leg_split_col'] else 'arm_right'
         return 'body'
-    if LEG_ROWS[0] <= row <= LEG_ROWS[1]:
-        return 'leg_left' if col < LEG_SPLIT else 'leg_right'
+    if y in pm['leg_rows']:
+        return 'leg_left' if x <= pm['leg_split_col'] else 'leg_right'
     return None
 
 

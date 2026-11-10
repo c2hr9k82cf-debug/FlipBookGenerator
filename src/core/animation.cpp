@@ -129,7 +129,12 @@ Animation makeIdle(const Rig& rig, int frameCount, const PresetParams& sp) {
     Animation a;
     a.name = "idle";
     a.frameCount = std::max(2, frameCount);
-    a.fps = 8;
+    // 4fps, not 8: the reference sheet gives idle 2 frames, so a full breath
+    // is one second only at 4fps. Slower reads as a statue; faster reads as
+    // shivering.
+    // 4fps 而非 8：参考图给 idle 2 帧，只有在 4fps 下一次呼吸才是整一秒。
+    // 再慢像雕像，再快像打颤。
+    a.fps = 4;
     a.loop = true;
 
     // ---- DETACH RULE / 脱节铁律 -------------------------------------------
@@ -168,12 +173,11 @@ Animation makeIdle(const Rig& rig, int frameCount, const PresetParams& sp) {
     // Amplitude is 2px, not 1px: with a 1px bob every lerped in-between frame
     // rounds to the same offset, so the body stutters between two heights
     // instead of rising and falling. 2px triangulates cleanly through the
-    // pixels. The four poses alternate rest/inhale/rest/inhale so the cycle
-    // reads as 0,-1,-2,-1,0,-1,-2,-1 — a clean breathing wave.
+    // pixels. The reference sheet gets away with 1px only because it hard-cuts
+    // between its two frames and never interpolates.
     // 幅度是 2 像素而非 1：起伏只有 1 像素时，所有插值中间帧取整到同一偏移，
     // 身体在两个高度间抽搐而不是起落。2 像素能在像素上走出干净的三角波。
-    // 四个姿势按 静止/吸气/静止/吸气 交替，整个循环是
-    // 0,-1,-2,-1,0,-1,-2,-1 —— 一道干净的呼吸波。
+    // 参考图能用 1 像素，只因它是两帧硬切、从不插值。
     //
     // No shoulder roll. Tried it, and at 8deg it read as the character
     // shrugging, not breathing — worse, nearest-neighbour rotation cost the
@@ -187,11 +191,19 @@ Animation makeIdle(const Rig& rig, int frameCount, const PresetParams& sp) {
 
     const float bob = -2.f * sp.breathScale;
 
+    // TWO keyframes, not four. The reference sheet gives idle exactly 2 frames
+    // (rows 0/2/4 hold 2 cells each), and at a 2-frame count four keyframes
+    // collapse onto the same two frame indices: the poses overwrite each other
+    // and both frames come out identical. Two keyframes give exactly one
+    // breath per cycle, which is what the sheet draws.
+    // 两个关键帧，不是四个。参考图给 idle 正好 2 帧（row 0/2/4 各 2 格），而
+    // 帧数为 2 时四个关键帧会塌到相同的两个帧序号上：姿势互相覆盖，两帧变得
+    // 一模一样。两个关键帧恰好一次呼吸一个循环，正是参考图画的东西。
     Pose rest;
     Pose inhale = rest;
     inhale.rootY = bob;
 
-    spreadKeyframes(a, {rest, inhale, rest, inhale});
+    spreadKeyframes(a, {rest, inhale});
     return a;
 }
 

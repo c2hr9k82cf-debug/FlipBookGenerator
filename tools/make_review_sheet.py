@@ -60,7 +60,12 @@ PRESET_LABELS = {
     "walk_up":    "walk_up / 背走（↑ 向上）",
 }
 GIF_MS = {"idle": 125, "walk_side": 100, "walk_front": 100, "walk_up": 100}
-PRESET_FPS = {"idle": 8, "walk_side": 10, "walk_front": 10, "walk_up": 10}
+# Frame rates match the reference sheet (and src/core/animation.cpp): idle is
+# 2 frames @ 4fps = one breath per second, walk is 6 frames @ 10fps = a 600ms
+# stride. These drive the GIFs' playback speed.
+# 帧率对齐参考图（以及 src/core/animation.cpp）：idle 2 帧 @ 4fps = 一秒一次呼吸，
+# walk 6 帧 @ 10fps = 一步 600ms。它们决定 GIF 的播放速度。
+PRESET_FPS = {"idle": 4, "walk_side": 10, "walk_front": 10, "walk_up": 10}
 
 
 # ---------------------------------------------------------------------------

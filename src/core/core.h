@@ -101,6 +101,13 @@ struct Keyframe {
 
 struct Animation {
     std::string name;
+    // Defaults are a fallback only: every preset overwrites both with the
+    // reference-sheet counts — idle 2 frames @ 4fps (one breath per second),
+    // walk 6 frames @ 10fps (a 600ms stride). Do not "improve" these numbers;
+    // the reference sheet is the absolute template.
+    // 默认值只是兜底：每个预设都会用参考图的帧数覆盖 —— idle 2 帧 @ 4fps
+    // （一秒呼吸一次），walk 6 帧 @ 10fps（一步 600ms）。不要"优化"这些数字，
+    // 参考图是绝对模板。
     int  frameCount = 8;
     int  fps        = 8;
     bool loop       = true;
@@ -129,19 +136,22 @@ float lerpAngleDeg(float a, float b, float t);
 // 这些是填充同一个 Animation 结构的【数据生成器】，不是独立代码路径。
 // 所以待机和走路能在任何 GUI 编辑器存在之前先跑出来。
 
-// Gentle vertical bob + slight torso squash. 2-4 keyframes.
-// 轻微上下起伏 + 躯干微压扁。
-Animation makeIdle(const Rig& rig, int frameCount = 8);
+// Gentle vertical bob. 2 frames @ 4fps = one breath per second, exactly as
+// the reference sheet draws it (rows 0/2/4 hold 2 cells each).
+// 轻微上下起伏。2 帧 @ 4fps = 一秒呼吸一次，与参考图画法一致（row 0/2/4 各 2 格）。
+Animation makeIdle(const Rig& rig, int frameCount = 2);
 
 // Side view walk: legs swing about the hips, arms counter-swing, body bobs.
-// 侧面走路：腿绕胯摆动，手臂反向摆，身体起伏。
-Animation makeWalkSide(const Rig& rig, int frameCount = 8);
+// 6 frames @ 10fps = a 600ms stride, exactly as the reference sheet draws it.
+// 侧面走路：腿绕胯摆动，手臂反向摆，身体起伏。6 帧 @ 10fps = 一步 600ms，
+// 与参考图画法一致。
+Animation makeWalkSide(const Rig& rig, int frameCount = 6);
 
 // Front/back walk: legs read as foreshortening, so in-plane rotation looks
-// wrong — use small alternating translations instead. See CLAUDE.md.
-// 正面/背面走路：腿是遮挡关系，平面内旋转会怪 —— 改用交替小幅位移。
-Animation makeWalkFront(const Rig& rig, int frameCount = 8);
-Animation makeWalkUp(const Rig& rig, int frameCount = 8);
+// wrong — lift them by scaleY instead. See CLAUDE.md.
+// 正面/背面走路：腿是遮挡关系，平面内旋转会怪 —— 改用 scaleY 抬腿。见 CLAUDE.md。
+Animation makeWalkFront(const Rig& rig, int frameCount = 6);
+Animation makeWalkUp(const Rig& rig, int frameCount = 6);
 
 // Scale all motion by a factor (used by the GUI sliders). 1.0 = preset default.
 // 按系数缩放全部动作（供 GUI 滑杆）。1.0 = 预设默认值。
