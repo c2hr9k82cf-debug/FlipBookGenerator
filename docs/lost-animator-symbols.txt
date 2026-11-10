@@ -173,10 +173,35 @@ process — it lived only in the working tree.
 丢失的模块**基本是完整的**：加载 → 编辑姿势 → 存关键帧 → 插值 → 导出帧与精灵图。
 毁掉它的不是代码，而是流程 —— 它只存在于工作区里。
 
+### Independent recollection / 独立回忆（非符号表来源）
+
+A contemporaneous project memory (written 2026-06-12, before the rollback) records
+detail the object file cannot reveal — worth keeping, since it is the only other
+eyewitness account:
+一份同时期的项目记忆（写于 2026-06-12 回滚之前）记录了目标文件无法显示的细节 ——
+值得保留，因为那是唯一的另一份目击记录。
+
+- The work had progressed to **V0.6.2**, not V0.4.6 as `git log` and the old
+  `CLAUDE.md` suggest. The gap between "done on disk" and "done in git" is the whole
+  story. / 工作已推进到 **V0.6.2**，而非 git 记录的 V0.4.6。"磁盘上完成"与"git 里完成"
+  的差距就是全部真相。
+- A **Mode 3 ("Animation only")** existed: if parts were already extracted, skip
+  straight to the pose editor. / 曾有 **Mode 3（仅动画）**：部件已提取就直接进姿势编辑器。
+- Anchors were added by **right-click**, **multiple per part** — which explains
+  `A/D: Switch anchor` and the `index` column in the old `anchors.txt` format.
+  / 锚点用**右键**添加、**每部件多个** —— 这解释了 `A/D: Switch anchor` 和旧格式里的
+  `index` 列。
+- Pose editor modes: 0=select, 1=rotate, 2=scale, 3=move (matches the 4 strings in §2).
+  / 姿势编辑器模式：0=选择、1=旋转、2=缩放、3=移动（与 §2 的四条串一致）。
+- The stated goal then was already "one command → extract → animate, no manual path
+  re-entry" — i.e. the seamless wizard the project is building now. / 当时的目标已经是
+  "一条命令 → 提取 → 动画，不用重复输路径"，也就是现在正在做的无缝向导。
+
 **What is salvaged / 保留下来的**
 - The idea that a pose is `(partId → transform)` and keyframes are lerped.
 - The transform field set: rotate / scaleY / moveX / moveY.
 - The I/O contract above — the surviving `output/parts/` bundle loads as-is.
+- The goal of a seamless extract→animate flow (now: a wizard instead of a mode chain).
 
 **What is discarded / 推翻的**
 - The 2-anchor bone model (`anchors.txt` index 0/1 = bbox top/bottom center). It is wrong
