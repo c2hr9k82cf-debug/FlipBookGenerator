@@ -1,120 +1,323 @@
 # FlipBookGenerator
 
-Animation resource generation tool for indie game developers.
-面向独立游戏开发者的动画资源生成工具。
+Turn AI-generated pixel-art character images into flipbook animations, entirely locally.
+把 AI 生成的像素风角色图变成翻页动画，全程本地。
 
-## Current Version / 当前版本
+**One image in → animation out. No cloud, no AI dependency in the tool itself.**
+**一张图进去，动画出来。无云端，工具本身不依赖 AI。**
 
-V0.4.6
+## Current state / 当前状态
 
-## Completed Features / 已完成功能
+**V0.5.0 — re-planned. The roadmap below is the source of truth, not the old feature list.**
+**V0.5.0 —— 已重新规划。下面的路线图是唯一准绳，旧功能清单不是。**
 
-- V0.1: Read PNG images from assets/, sort by filename, concatenate horizontally to sprite sheet, output to output/spritesheet.png
-  读取 assets/ 中 PNG 图片，按文件名排序，横向拼接为 Sprite Sheet，输出到 output/spritesheet.png
-- V0.2: Auto-normalize frame sizes with transparent background, center-align each frame, then concatenate
-  自动统一帧尺寸（透明背景），居中对齐每帧，再进行拼接
-- V0.2.1: Runtime prompt for target frame size (default: 32), scale-to-fit with aspect ratio preserved
-  运行时询问目标帧尺寸（默认 32），按比例缩放适配
-- V0.3: Animation preview with adjustable FPS, pause/resume, step-through controls
-  动画预览，支持帧率调节、暂停/继续、逐帧播放
-- V0.4: Body part extraction via grid-based editor, mouse painting with 6 fixed parts (head, body, arms, legs)
-  身体部件提取，格子编辑器，鼠标涂色，6 个固定部件（头、躯干、手臂、腿）
-- V0.4.1: Code modularization — split main.cpp into utils, spritesheet, extractor modules
-  代码模块化 — 将 main.cpp 拆分为 utils、spritesheet、extractor 模块
-- V0.4.2: Auto detection using k-means color clustering, 3 modes (manual/auto/auto+refine)
-  自动检测（k-means 颜色聚类），3 种模式（手动/自动/自动+微调）
-- V0.4.3: Editor UX improvements — white background, eraser tool (key 7), highlight current part only, hide others
-  编辑器 UX 改进 — 白色背景、橡皮工具（按键 7）、仅高亮当前部件、隐藏其他部件
-- V0.4.4: Editor display fix — original image visible, light gray bg, unified overlay, eraser only erases selected part
-  编辑器显示修复 — 原图可见、浅灰背景、统一覆盖层、橡皮仅擦除选中部件
-- V0.4.5: Editor visibility — colored grid border + center cross for selected cells
-  编辑器可见性 — 选中格子彩色边框 + 中心十字标记
-- V0.4.6: Thinner selection border, overview mode (key 9) showing all part boundaries
-  更细的选中边框，总览模式（按键 9）显示所有部件边界
+| What runs today / 今天能跑 | Status |
+|---|---|
+| Mode 1: multi-image → sprite sheet + preview / 多图拼表 + 预览 | ✅ works |
+| Mode 2: single image → 6 body parts + placement metadata / 单图提取部件 + 位置元数据 | ✅ works |
+| Grid editor (paint / erase / k-means auto-detect / overview) / 格子编辑器 | ✅ works |
+| **Animation generation / 动画生成** | ❌ **not built** — this is the goal |
 
-## Roadmap / 版本路线图
+The CLI mode menu in `src/main.cpp` is **temporary**. It is being replaced by a
+guided wizard GUI with a double-clickable `.app`. Do not add features to the menu.
+`src/main.cpp` 的模式菜单是**临时的**，正被"可双击 `.app` 的引导式向导"取代。不要往菜单加功能。
 
-### V0.4: Body Part Extraction / 身体部件提取 ✅
+---
 
-Load a single character image (pixel art), use grid-based manual division to extract body parts (head, body, arms, legs) as separate PNG layers.
-加载单张角色图（像素风），通过格子人工划分，提取身体部件（头、躯干、手臂、腿）为独立 PNG 图层。
+## ⚠️ The lost-animator incident / animator 丢失事故
 
-### V0.5: Skeleton & Pose Definition / 骨骼与姿势定义
+**Read this before writing any code. / 动手写代码前先读这段。**
 
-Define anchor points (pivot) for each body part (e.g., shoulder for arms, hip for legs).
-为每个部件定义旋转锚点（如手臂锚点在肩膀，腿锚点在胯部）。
+A complete V0.5 animation module (`src/animator.cpp` + `animator.h`) was written,
+compiled, run, and produced working output on 2026-06-12 — then deleted from the
+working tree **without ever being committed to git**. The project's roadmap stalled
+for a long time after that.
 
-- Interactive anchor point placement
-  交互式锚点设置
-- Pose editor: rotate/translate body parts to define keyframe poses
-  姿势编辑器：旋转/平移部件定义关键帧姿势
+一个完整的 V0.5 动画模块（`src/animator.cpp` + `animator.h`）曾被写出、编译、运行，
+并在 2026-06-12 产出可用结果 —— 随后从工作区删除，**且从未提交到 git**。之后项目路线图长期停滞。
 
-### V0.6: Tweening Animation / 补间动画
+What survived / 侥幸留下的：
+- `build/CMakeFiles/flipbook.dir/src/animator.cpp.o` — an orphan object file
+- `output/parts/*.png` + `*_bbox.txt` + `anchors.txt` + `image_path.txt` — its I/O
+- `output/animation/` — one failed export test
 
-Automatically generate in-between frames by interpolating keyframe poses.
-通过关键帧姿势插值，自动生成中间帧。
+All of it is now recorded in **`docs/lost-animator-symbols.txt`** (full API, data
+model, UI flow, I/O contract, strings). Recovered design highlights:
+现已全部记录在 `docs/lost-animator-symbols.txt`（完整 API、数据模型、交互流程、I/O 契约、字符串）。还原出的设计要点：
 
-- Linear interpolation of rotation angles and positions
-  旋转角度和位置的线性插值
-- Configurable number of tween frames
-  可配置补间帧数
-- Generate and export flipbook animation
-  生成并导出翻页书动画
+- A pose was a sparse `std::map<int, PartTransform>` keyed by part id; keyframes
+  were lerped element-wise (`interpolate(map, map, float)`).
+- Transform field set: `rotate / scaleY / moveX / moveY`.
+- I/O: read `output/parts/{png,_bbox.txt,anchors.txt,image_path.txt}`, write
+  `output/animation/frame_N.png` + `spritesheet.png`.
+- UI was OpenCV highgui + console prompts — the layer this project is now leaving.
 
-### V0.7: Multi-view Fusion / 多视图融合
+**The design is deliberately discarded** (see [Design decisions](#design-decisions));
+the *record* stays.
 
-Use front, side, and back views to generate multi-angle animations.
-利用正面、侧面、背面视图生成多角度动画。
+### Lesson / 教训
 
-## Design Discussion / 设计讨论
+> **Commit at every verifiable milestone.** Never let a working feature live only in
+> the working tree. Small commits are cheap; lost work is not.
+> **每个可验证的里程碑都要提交。** 绝不要让能跑的功能只活在工作区里。小提交很便宜，丢工作很贵。
+
+---
+
+## Data formats / 数据格式规格
+
+The part bundle is the project's **interface** between extraction and animation.
+Everything downstream reads it. Do not change these formats without updating both
+sides and the fixture.
+部件包是提取与动画之间的**接口**，下游全靠它读。改格式必须两边同步，并更新夹具。
+
+Written by `runExtractPartsMode()` (`src/extractor.cpp`) to `output/parts/`:
+
+| File | Format | Meaning |
+|---|---|---|
+| `{name}.png` | BGRA | part sprite cropped to its bbox / 部件精灵图，已裁到包围盒 |
+| `{name}_bbox.txt` | `x y w h` | placement, **original-image coordinates** / 位置，**原图坐标** |
+| `anchors.txt` | `partId x y` | one rotation pivot per part, original-image coords / 每部件一个旋转锚点 |
+| `image_path.txt` | path | source image, relative to project root / 源图路径 |
+
+`name` ∈ `head`, `body`, `arm_left`, `arm_right`, `leg_left`, `leg_right` (ids 1–6, see `src/utils.cpp`).
+
+**Reconstruction invariant / 重建不变量** — the correctness gate for the whole pipeline:
+> Blit each `{name}.png` at its `_bbox.txt` offset onto a transparent canvas of the
+> source size. The result must equal the source image **pixel-exact, including alpha**.
+> 把每个部件按 bbox 偏移贴回透明画布，结果必须**逐像素（含 alpha）**等于源图。
+
+If this fails, extraction lost pixels and every animation frame built on top will be
+wrong. It is checked headlessly (`--recon-test`) and via a Verify button in the GUI.
+**Committed fixture / 已提交夹具**: `tests/fixtures/character_32/` — a complete,
+verified bundle from `assets/character_32.png`. All 6 part PNG sizes match their
+bbox w/h exactly. Use it as the test input; do not regenerate it casually.
+
+---
+
+## Design decisions / 设计决策
 
 ### Why not outline-based detection? / 为什么不基于描边检测？
 
-Initial idea was to use black outlines to separate body parts. Problem: if outlines are not perfectly drawn, detection fails. Too fragile for real-world use.
-最初设想用黑色描边分隔部件。问题：描边不完美时检测失败，太脆弱。
+If outlines are not perfectly drawn, detection fails. Too fragile for real use.
+描边不完美时检测失败，太脆弱。
 
 ### Why not layered export? / 为什么不直接分层导出？
 
-Requiring users to export layers from PS/Aseprite adds workflow friction. AI-generated images can't be layered. We want "one image in, animation out".
-要求用户从 PS/Aseprite 分层导出增加了工作流摩擦。AI 生成的图片无法分层。我们希望"一张图进去，动画出来"。
+Requiring PS/Aseprite layer export adds workflow friction, and AI-generated images
+have no layers. We want "one image in, animation out".
+要求分层导出增加摩擦，AI 生成的图没有图层。我们要"一张图进去，动画出来"。
 
-### Final approach: Grid division for pixel art / 最终方案：像素风格子划分
+### Why grid division for pixel art? / 为什么用格子划分？
 
-Pixel art is low-res and grid-based by nature. A grid overlay tool lets users manually assign pixels to body parts. Combined with auto detection as a starting point, this is both robust and flexible.
-像素风本身低分辨率且基于格子。格子覆盖工具让用户手动分配像素到各部件。结合自动检测作为起点，既稳健又灵活。
+Pixel art is low-res and grid-based by nature. A grid overlay lets users assign
+pixels to parts manually, with auto-detection as a starting point. Robust and flexible.
+像素风本身低分辨率且基于格子。格子覆盖让用户手动分配像素，自动检测当起点。稳健又灵活。
+Works with any single image, no outline dependency, ~1024 cells max at 32x32,
+local computation only.
 
-- Works with any single image (AI-generated or hand-drawn)
-  适用于任何单张图片（AI 生成或手绘）
-- No dependency on outline quality
-  不依赖描边质量
-- Small grid count for pixel art (32x32 = 1024 cells max)
-  像素风格子数量少（32×32 最多 1024 格）
-- Local computation, no cloud, no AI dependency in the tool itself
-  本地计算，无云端，工具本身不依赖 AI
+### GUI: Dear ImGui (docking) + GLFW + OpenGL3 / GUI 选型
 
-## Tech Stack / 技术栈
+| | Dear ImGui | Qt |
+|---|---|---|
+| Dependency | FetchContent, statically linked | Homebrew qt, hundreds of MB |
+| Packaged `.app` | single binary; only OpenCV dylibs need bundling | `macdeployqt`, fragile |
+| Zoomable pixel canvas | DrawList — its home turf | heavier, fights pixel-exact blits |
+| Licence | MIT / Zlib | LGPL |
 
-- Language / 语言: C++17
-- Build / 构建: CMake 3.14+
-- Image Library / 图像库: OpenCV 4.x (via Homebrew)
-- Environment / 环境: macOS + VSCode
+Target audience is game developers; a tool-style UI is the *right* look. Native file
+dialogs via **portable-file-dialogs** (single header, MIT).
+配套用 portable-file-dialogs 做原生文件框。
 
-## Project Structure / 项目结构
+**Architectural rule / 架构铁律**: `flipbook_core` never includes a UI header;
+`ui/` never calls `cv::imshow`. This is what makes a future framework swap survivable.
+`core/` 永不 include UI 头；`ui/` 永不调用 `cv::imshow`。将来换框架才活得下来。
+
+### Packaging / 打包
+
+OpenCV stays, and its dylibs are bundled into the `.app` with `dylibbundler` into
+`Contents/Frameworks/` with `@rpath` fixed. The killer failure is a `.app` that
+crashes on launch on a machine without Homebrew — always test on a clean machine.
+最大坑是没装 Homebrew 的机器上双击即崩 —— 一定要在干净机器上测。
+
+Rejected alternative / 已排除的备选：drop OpenCV entirely (stb_image + hand-rolled
+k-means/resize/bbox) for a zero-dependency single binary. Attractive — `cv::resize`
+defaults to bilinear, which is **wrong** for pixel art — but it is a second
+architectural change on top of the GUI migration. Revisit only if bundling proves painful.
+
+### Skeleton vs. template — how 3 views become 3 flipbooks / 骨架与模板分离
+
+The hard problem: front, side and back are three *different* flipbooks, and left/right
+are a fourth and fifth. Solved by splitting per-view rig data from view-independent
+animation templates.
+难点是正面/侧面/背面是三套不同的翻页书，左右又是两套。解法是把**每视图的骨架数据**
+和**与视图无关的动画模板**分开。
+
+```
+        动画模板（视图无关）: walkSide / walkFront / walkUp / idle
+                    │ 套用到
+   ┌────────────────┼────────────────┐
+ 正面骨架        侧面骨架          背面骨架
+   │                │                │
+ 走路向下        走路向右 ──镜像──▶ 走路向左
+```
+
+One template × three rigs = three different flipbooks. Left is a horizontal mirror of
+right (exact and free for pixel art), so **3 input images yield 4 walking directions
+plus idle**. Three templates are needed because a side view's legs swing by rotation
+while a front view's legs read as foreshortening — in-plane rotation looks wrong there.
+一套模板 × 三个骨架 = 三套翻页书。左右靠水平镜像，所以 **3 张图给出 4 方向行走 + 待机**。
+需要三套模板，因为侧面的腿靠旋转、正面的腿是遮挡关系，平面内旋转在正面很怪。
+
+### Animation data model / 动画数据模型
+
+Flat, **one free-placed pivot per part** (the old 2-anchor bone model is discarded —
+see `docs/lost-animator-symbols.txt`). Structures live in `src/core/` and depend on
+no UI or image-library types. See [Roadmap Phase 1](#phase-1--animation-core-engine-no-ui-).
+扁平模型，**每部件一个自由放置的 pivot**（旧的 2 锚点骨骼模型已推翻）。结构体在
+`src/core/`，不依赖 UI 或图像库类型。
+
+Presets (`makeIdle` / `makeWalkSide` / `makeWalkFront` / `makeWalkUp`) are **data
+generators that fill the same `Animation` struct** the editor edits — not separate
+code paths. Idle and walk therefore ship before any GUI editor exists.
+预设是**填充同一个 `Animation` 结构的数据生成器**，不是独立代码路径。所以待机和走路
+能在任何 GUI 编辑器存在之前就先跑出来。
+
+### Pixel-art transform rules / 像素风变换硬约束
+
+Non-negotiable. Encode in `src/core/transform.cpp` and never violate in the render path.
+没有商量余地。写进 `src/core/transform.cpp`，渲染路径永不违反。
+
+- **Nearest-neighbour only.** Never `INTER_LINEAR`/`INTER_CUBIC`. (`spritesheet.cpp`
+  uses `INTER_AREA` for multi-frame normalisation — that is a different path and fine.)
+- **Rotation rasterises by inverse mapping + nearest sampling.** Forward-sampling a
+  rotation punches holes; inverse mapping does not.
+- **Translations round to the integer pixel grid** at raster time. This *is* the
+  pixel-perfect mode; there is no sub-pixel option.
+- **No anti-aliasing anywhere. No blending at part overlaps** — z-order wins.
+  Semi-transparent edge blending instantly breaks pixel perfection.
+- Off-multiple-of-90° rotations look chunky. That is the idiom, not a bug. Alt snaps
+  to 15° in the editor.
+
+### ⚠️ Quality expectation / 质量预期
+
+**Rotating parts yields puppet / skeletal-animation motion, not hand-drawn pixel art.**
+The input is a small number of static images and the motion is computed. This is
+inherently unable to reach Aseprite hand-drawn quality.
+
+**旋转部件得到的是"提线木偶/骨骼动画"式的活动感，不是逐帧手绘像素画的质感。**
+输入是少数几张静态图，动作是算出来的，原理上到不了 Aseprite 手绘的程度。
+
+Fine for prototyping, game jams and procedural animation. Say this plainly in the
+README — do not market it as hand-drawn. If hand-drawn quality is required, the answer
+is "have the AI draw multiple poses", not "compute the motion"; that is a possible
+extension (two-pose tweening), not this plan's main line.
+
+**16x16 warning / 16x16 警告**: a leg may be 3x6 px, where rotation is invisible.
+**32x32 is the recommended minimum.** Below that, auto-degrade to translation-only
+templates.
+
+---
+
+## Roadmap / 路线图
+
+Every phase ends **runnable and visible**. Value first: the core mechanism is proven
+*before* any GUI exists, because "does rotating pixel parts look acceptable?" is the
+project's biggest unknown.
+每阶段结束都**能跑能看见**。价值优先：核心机制在任何 GUI 存在之前就先被证明，因为
+"旋转像素部件到底好不好看"是本项目最大的未知数。
+
+### Phase 0 — Init / 初始化 ✅
+
+Repo hygiene and truthful docs. Untrack `build/` + `output/`, commit
+`tests/fixtures/character_32/`, archive the lost animator's symbols, write placement
+metadata + sensible default pivots, single version source, rewrite this file.
+
+### Phase 1 — Animation core engine (no UI) / 动画核心引擎（无 UI）
+
+⭐ Highest risk, done first, without UI.
+
+`src/core/` — pure C++, links OpenCV only, never includes a UI header:
+`image_io`, `rig`, `transform`, `animation`, `composer`, `exporter`.
+
+1. **First task is the reconstruction gate** — read the fixture, blit back, must be
+   pixel-exact against `assets/character_32.png`. Fix extraction before animating.
+2. Headless entry: `--recon-test`, `--preset idle|walk --frames N --out DIR`.
+3. Eyeball the output strips. **The single most important manual review in the project.**
+   If it looks bad, tune here (less rotation, translate-only, different fps) — not in the GUI.
+
+### Phase 2 — GUI shell + packaging / GUI 壳 + 打包
+
+ImGui/GLFW/GL3 via FetchContent; targets split into `flipbook_core` (lib) + `flipbook` +
+`tests`. **Day-one spike gate: window + textured quad + mouse coords. Do not write
+panels until that passes** — GLFW/OpenGL3 build friction on macOS arm64 is a real risk.
+Then: wizard state machine (5 steps), `ui/canvas` (zoomable pixel canvas — the shared
+foundation), `build_app.sh` producing `output/dist/FlipBookGenerator.app`, real import step.
+
+### Phase 3 — Split + anchors in the wizard / 切分 + 锚点进向导
+
+Port `extractor.cpp`'s *algorithms* to the canvas (partMap, paint/erase, k-means).
+**Discard** `buildDisplayImage`/`buildOverviewImage` — per-pixel `cv::rectangle` is too
+slow; draw with ImGui DrawList. Anchor placement per part with sensible defaults
+(see `defaultPivot`). End with a reconstruction preview + Verify button.
+
+### Phase 4 — Single-view preset export / 单视图预设动画导出 ⭐ Milestone A
+
+Preset cards (walk / idle) with live preview + sliders (frames, fps, rotation amount,
+bob amount). Export step with playback (port the `spritesheet.cpp` preview controls to
+buttons/sliders), spritesheet PNG / frame sequence / both.
+**Golden invariant: GUI export must be byte-identical to CLI export of the same data.**
+*This is where "one image in, animation out" becomes real.*
+
+### Phase 5 — Multi-view batch / 多视图批处理 ⭐⭐ Milestone B = **done**
+
+1–3 views (front/side/back), each with its own rig. One set of template parameters
+applied across all rigs. Direction mapping + mirroring (down=front, up=back,
+right=side, left=side mirrored). Game-ready export: one spritesheet PNG per animation
++ engine-agnostic JSON metadata (frame size, count, fps, loop flag, name → frame range).
+*This is what the tool is actually for.*
+
+### Phase 6 — (optional) Custom keyframe tool / 自定义关键帧工具
+
+Timeline UI, per-part transform editing, project save/load (`.fba.json`).
+**Deferred on purpose**: in a multi-view workflow hand-editing keyframes is a burden,
+not a help — you would be editing 3 rigs × N animations. Presets + sliders are the
+right interaction. Kept because it was originally requested; not counted toward "done".
+**Alternative extension if quality falls short / 质量不足时的备选扩展**: accept 2 images
+per view (stand + walk pose) and tween between them. Much better output, still fully
+automatic, costs 6 input images instead of 3.
+
+### Phase 7 — Polish / 收尾
+
+Icon, About, error messages, README rewrite, ARCHITECTURE.md refresh, distribution script.
+
+**"Done" = Phase 5. / "完成" = Phase 5.** Phase 6/7 can be deferred indefinitely.
+
+---
+
+## Project structure / 项目结构
 
 ```
 FlipBookGenerator/
-├── CLAUDE.md           # Project documentation / 项目记录
-├── CMakeLists.txt      # Build config / 构建配置
+├── CLAUDE.md               # this file — true state, incident, formats, decisions
+├── ARCHITECTURE.md         # module map + function reference
+├── docs/
+│   └── lost-animator-symbols.txt   # forensic record of lost work
 ├── src/
-│   ├── main.cpp        # Entry point + mode selection / 入口 + 模式选择
-│   ├── utils.h/cpp     # Common definitions / 公共定义
-│   ├── spritesheet.h/cpp # Sprite sheet generation / Sprite Sheet 生成
-│   └── extractor.h/cpp # Body part extraction / 身体部件提取
-├── assets/             # Input images / 输入图片
-└── output/             # Output directory / 输出目录
+│   ├── main.cpp            # TEMPORARY CLI menu + future CLI arg dispatch
+│   ├── version.h.in        # generated to build/generated/version.h
+│   ├── utils.h/cpp         # PartDef, PARTS, defaultPivot()
+│   ├── spritesheet.h/cpp   # Mode 1: multi-image sprite sheet + preview
+│   └── extractor.h/cpp     # Mode 2: grid editor + part extraction
+├── tests/
+│   └── fixtures/character_32/      # committed verified part bundle
+├── assets/                 # input images
+└── output/                 # 100% generated, 100% gitignored
 ```
 
-## Build Instructions / 构建方式
+Planned additions / 计划新增：`src/core/` (UI-free engine), `src/extract/` (algorithms),
+`src/ui/` (ImGui wizard), `third_party/`, `build_app.sh`, `CMakeLists.txt` target split.
+
+## Build / 构建
 
 ```bash
 mkdir -p build && cd build
@@ -124,26 +327,23 @@ cd ..
 ./build/flipbook
 ```
 
-## Technical Decisions / 技术决策
+Requires CMake 3.14+, C++17, OpenCV 4.x (Homebrew: `/opt/homebrew`), macOS + VSCode.
 
-- Use std::filesystem for directory traversal (C++17)
-  使用 std::filesystem 遍历目录（C++17）
-- Use cv::hconcat for horizontal concatenation
-  使用 cv::hconcat 横向拼接图片
-- IMREAD_UNCHANGED preserves alpha channel
-  IMREAD_UNCHANGED 保留 Alpha 通道
-- Auto-normalize to max dimensions with transparent BGRA canvas
-  自动统一到最大尺寸，使用透明 BGRA 画布居中对齐
-- Single-file architecture, keep it simple
-  单文件结构，不过度拆分
-- Bilingual comments: English on top, Chinese below
-  注释双语：英文在上，中文在下
-- All image processing runs locally, no cloud dependency
-  所有图像处理本地运行，无云端依赖
+## Conventions / 约定
 
-## Future Improvements / 未来改进
+- **Bilingual comments: English on top, Chinese below.** / 注释双语：英文在上，中文在下
+- All image processing runs locally. No cloud, no AI dependency in the tool.
+  / 所有图像处理本地运行，无云端，工具本身不依赖 AI
+- `std::filesystem` for directory traversal (C++17) / 用 std::filesystem 遍历目录
+- `cv::IMREAD_UNCHANGED` preserves alpha / IMREAD_UNCHANGED 保留 Alpha
+- Keep modules small and headers minimal / 模块保持小，头文件保持精简
 
-- Batch selection and delete in editor (select multiple cells at once)
-  编辑器批量选择和删除（一次选择多个格子）
-- GUI with drag-drop, buttons, and visual part switching
-  可视化界面：拖拽图片、按钮、部件切换
+## Working rules / 工作规则
+
+- **Commit at every verifiable milestone** (see the incident above).
+  / **每个可验证的里程碑都要提交**（见上文事故）
+- Keep `flipbook_core` free of UI includes; keep `ui/` free of `cv::imshow`.
+- Never violate the pixel-art transform rules in the render path.
+- Do not polish the GUI past the stated minimum panel set per phase — GUI scope creep
+  is the real schedule killer. Docking polish, sub-pixel modes and GIF export are
+  explicitly out of scope.
