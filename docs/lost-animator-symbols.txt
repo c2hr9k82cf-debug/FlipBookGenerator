@@ -123,6 +123,19 @@ This I/O contract is what produced the surviving untracked artifacts in `output/
 and `output/animation/`.
 磁盘上那批未跟踪的产物正是这个 I/O 契约产出的。
 
+**Archived export samples / 已存档的导出样本** (copied out of `output/animation/`
+before it was removed, per the owner's instruction / 在删除 `output/animation/` 前按
+所有者指示拷出):
+
+- `docs/lost-animator-export-frame_0.png` — 32x32
+- `docs/lost-animator-export-spritesheet.png` — 32x32
+
+Both are byte-identical (same SHA-1), i.e. the export produced exactly **one** frame:
+a smoke test, not a working animation. The character occupies a small area of a 32x32
+canvas and does not move. This is the only animation the lost module ever emitted.
+两张图字节完全相同（SHA-1 一致），即导出只有**一帧**：这是冒烟测试，不是能用的动画。
+角色只占 32×32 画布的一小块，且没有动。这是丢失模块产出过的唯一动画。
+
 ---
 
 ## 4. External calls / 调用的外部接口
