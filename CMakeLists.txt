@@ -33,6 +33,7 @@ add_library(flipbook_core STATIC
     src/core/animation.cpp
     src/core/render.cpp
     src/core/export.cpp
+    src/core/parts.cpp
 )
 target_link_libraries(flipbook_core ${OpenCV_LIBS})
 

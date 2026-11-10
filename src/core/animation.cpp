@@ -219,8 +219,12 @@ Animation makeWalkSide(const Rig& rig, int frameCount, const PresetParams& sp) {
     // 18deg, not 22: at 22deg a 6px-wide leg's edge pixel splits off during
     // rasterisation (the detach gate caught it). 18deg keeps the stride readable
     // without tearing the sprite.
+    // Measured from reference: max boot x-displacement ~3px over hip-to-boot
+    // length ~10px → atan(3/10) ≈ 17°, confirming 18° is close.
     // 18 度而非 22：22 度时 6px 宽的腿边缘像素在光栅化时会掉出去（脱节闸门抓到）。
     // 18 度跨步仍然看得清，又不会撕裂精灵。
+    // 参考图测量：靴最大 x 位移约 3px，胯到靴长约 10px → atan(3/10) ≈ 17°，
+    // 确认 18° 已接近。
     const float leg = 18.f * sizeFade * sp.motionScale;
     const float arm = 11.f * sizeFade * sp.motionScale;
 
@@ -279,14 +283,18 @@ static Animation makeWalkFrontal(const Rig& rig, int frameCount,
     a.fps = 10;
     a.loop = true;
 
-    // Lift the foot by ~2.5px and the hand by ~1.5px however long the limbs
+    // Lift the foot by ~2px and the hand by ~1.5px however long the limbs
     // are, so a 16x16 rig lifts as visibly as a 32x32 one. Amplitudes are in
     // pixels because that is the unit the rasteriser can actually resolve —
     // a smaller lift silently rounds away on the in-between frames.
-    // 不论肢体多长，把脚抬起约 2.5 像素、手约 1.5 像素，这样 16x16 和 32x32
+    // Measured from reference: stepping boot bottom y31 vs planted boot bottom
+    // y28-y29 = ~2px lift (anim_reference.json walk_front frame_data).
+    // 不论肢体多长，把脚抬起约 2 像素、手约 1.5 像素，这样 16x16 和 32x32
     // 抬起的可见度一致。幅度以像素为单位，因为那是光栅化器唯一能分辨的单位
     // —— 更小的抬起在中间帧会被静默取整掉。
-    const float legLift = 2.5f;
+    // 参考图测量：迈步靴底 y31 vs 站立靴底 y28-y29 = 约 2px 抬起
+    // （anim_reference.json walk_front frame_data）。
+    const float legLift = 2.0f;
     const float armLift = 1.5f;
 
     // 2px bob for the same reason as walk_side — see the note there.

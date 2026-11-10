@@ -93,6 +93,49 @@ wrong. It is checked headlessly (`--recon-test`) and via a Verify button in the 
 verified bundle from `assets/character_32.png`. All 6 part PNG sizes match their
 bbox w/h exactly. Use it as the test input; do not regenerate it casually.
 
+### Character template / 角色模板
+
+`assets/templates/chibi_standard.json` — pixel-exact character template extracted
+from the reference sheet. All proportions, colors and part boundaries verified
+pixel-by-pixel (0-diff against reference cell (0,0)).
+从参考图逐像素提取的角色模板。所有比例、颜色、部件边界均逐像素验证
+（与参考图 (0,0) 格 0 差异）。
+
+| Property | Value | Meaning |
+|---|---|---|
+| Content | 14×30 px, x9-x22, y2-y31 | Character body in 32×32 canvas |
+| Head | y2-y12 (11 rows) | Hair + face, face skin only 2px at eye level |
+| Body | y13-y20 (8 rows) | Neck, chest, belt, waist |
+| Legs | y21-y31 (11 rows) | Hips, thighs, boots |
+| Palette | 15 colors | Exact RGB from reference, see JSON |
+
+`assets/templates/chibi_standard_pixels.txt` — full pixel map (30×14 ASCII art
+with palette key). This is the **standard** that all characters must match.
+完整像素图（30×14 ASCII 调色板键）。这是所有角色必须对齐的**规范**。
+
+`assets/templates/anim_reference.json` — measured animation metrics: leg positions,
+body offsets, tone-swap patterns for all 6 animation types.
+测量的动画数据：腿位、身体偏移、色调交换模式，覆盖全部 6 种动画类型。
+
+### Layer system (customization) / 分层系统（捏人）
+
+`src/core/parts.h` + `parts.cpp` — modular character layers for the future
+customization system (捏人系统): hair, face, clothing, body type, limbs are
+swappable `PartLayer`s that compose into a standard frame via `compositeCharacter()`.
+可换的 `PartLayer`（发型、脸、衣服、体型、四肢）通过 `compositeCharacter()`
+合成到标准帧。
+
+Data flow / 数据流:
+```
+PartLayer (swappable) → CharacterSpec (assembled) → Rig (existing pipeline)
+图层（可换）          → 角色规范（组装）         → Rig（现有管线）
+```
+
+Each layer has a **fixed integer anchor box** in canonical 32×32 space — no
+placement math, pixel-exact by construction. Palette roles enable recoloring.
+每个图层在标准 32×32 空间有**固定整数锚点框** —— 无定位计算，构造上像素精确。
+调色板角色支持换色。
+
 ---
 
 ## Design decisions / 设计决策
@@ -221,6 +264,20 @@ inherently unable to reach Aseprite hand-drawn quality.
 **旋转部件得到的是"提线木偶/骨骼动画"式的活动感，不是逐帧手绘像素画的质感。**
 输入是少数几张静态图，动作是算出来的，原理上到不了 Aseprite 手绘的程度。
 
+**Two animation tiers / 两级动画**:
+- **Tier A (procedural / 程序化)**: transform-based presets. Good motion quality,
+  never pixel-exact to hand-drawn reference. This is the current `animation.cpp`.
+  基于变换的预设。动作质量好，但永远不等于手绘参考。这是当前的 `animation.cpp`。
+- **Tier B (chip playback / 精灵片回放)**: per-frame hand-drawn sprite chips at
+  fixed positions. **Pixel-exact** to reference motion. Future "motion import"
+  (动作导入) for the customization system.
+  逐帧手绘精灵片固定位置回放。与参考动作**逐像素一致**。捏人系统的"动作导入"。
+
+The reference sheet's motion is **hand-redrawn per frame** (color swaps, redrawn
+hips, compressed torsos) — rigid `PartTransform`s cannot reproduce it exactly.
+参考图的动作是**逐帧手绘重画**的（颜色交换、髋部重绘、躯干压缩）—— 刚性变换
+无法精确复刻。
+
 Fine for prototyping, game jams and procedural animation. Say this plainly in the
 README — do not market it as hand-drawn. If hand-drawn quality is required, the answer
 is "have the AI draw multiple poses", not "compute the motion"; that is a possible
@@ -327,12 +384,19 @@ FlipBookGenerator/
 │       ├── rig.cpp         # load part bundles
 │       ├── animation.cpp   # interpolation + 4 preset generators
 │       ├── render.cpp      # inverse-mapping nearest-neighbour rasteriser
-│       └── export.cpp      # frames + spritesheet writer
+│       ├── export.cpp      # frames + spritesheet writer
+│       └── parts.h/cpp     # modular character layers (customization foundation)
 ├── tests/
 │   └── fixtures/character_32/      # committed verified part bundle
 ├── tools/
-│   └── make_test_character.py      # authors the 32x32 test character pixel-by-pixel
-├── assets/                 # input images
+│   ├── make_test_character.py      # authors the 32x32 test character pixel-by-pixel
+│   └── extract_reference_animation.py  # measures animation metrics from reference
+├── assets/
+│   ├── templates/          # character template + animation reference data
+│   │   ├── chibi_standard.json       # pixel-exact proportions/palette/part map
+│   │   ├── chibi_standard_pixels.txt # full pixel map (30×14 ASCII art)
+│   │   └── anim_reference.json       # measured leg positions/body offsets/tone swaps
+│   └── character_32.png    # test character (pixel-exact vs reference)
 └── output/                 # 100% generated, 100% gitignored
 ```
 
