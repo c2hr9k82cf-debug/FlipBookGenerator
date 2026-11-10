@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(FlipBookGenerator VERSION 0.5.2 LANGUAGES CXX)
+project(FlipBookGenerator VERSION 0.5.3 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -52,16 +52,32 @@ target_link_libraries(flipbook flipbook_core ${OpenCV_LIBS})
 # Tests / 测试
 #
 # The reconstruction gate is the project's correctness invariant: parts must
-# reassemble to their source pixel-exact before anything is animated.
+# reassemble to their source pixel-exact before anything is animated. It runs
+# per view — front, side and back each have their own rig and their own source,
+# so each has to prove itself separately.
 # 重建闸门是本项目的正确性不变量：部件必须能逐像素还原，才能开始做动画。
+# 它按视图各跑一次 —— 正面、侧视、背视各有自己的 rig 与源图，各自都要自证。
 # ---------------------------------------------------------------------------
 enable_testing()
-add_test(
-    NAME reconstruction
-    COMMAND flipbook --recon-test --bundle
-            ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/character_32
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-)
+foreach(view front side back)
+    if(view STREQUAL "front")
+        set(bundle tests/fixtures/character_32)
+    else()
+        set(bundle tests/fixtures/character_32_${view})
+    endif()
+    add_test(
+        NAME reconstruction_${view}
+        COMMAND flipbook --recon-test --bundle
+                ${CMAKE_CURRENT_SOURCE_DIR}/${bundle}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+endforeach()
+
+# Preset smoke test: the four presets are named after their visual intent
+# (walk_side walks sideways, walk_front walks toward the camera). They are
+# exercised on the front rig, which is the rig the preset names describe.
+# 预设冒烟测试：四个预设按视觉意图命名（walk_side 侧走、walk_front 走向镜头）。
+# 在正面 rig 上跑 —— 预设名描述的正是这套 rig。
 add_test(
     NAME presets_smoke
     COMMAND flipbook --presets --bundle

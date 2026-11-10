@@ -1,6 +1,7 @@
 {
   "name": "chibi_standard",
-  "description": "Pixel-exact character template extracted from reference sheet 09d46502714b463788ad0eb9a23ae0f9.png. All proportions, colors and part boundaries verified pixel-by-pixel.",
+  "description": "Pixel-exact character template extracted from reference sheet 09d46502714b463788ad0eb9a23ae0f9.png (archived as assets/reference_sheet.png). All proportions, colors and part boundaries verified pixel-by-pixel. Three views — front, side, back — each with its own pixel map and its own part_map.",
+
   "size": {"width": 32, "height": 32},
   "proportions": {
     "head": {"y_start": 2, "y_end": 12, "rows": 11},
@@ -12,6 +13,7 @@
     "margin_top": 2,
     "margin_bottom": 0
   },
+
   "palette": {
     "outline":       [46, 34, 47],
     "hair_mid":      [247, 150, 23],
@@ -46,13 +48,7 @@
     "T": "teal",
     ".": null
   },
-  "part_map": {
-    "head_rows": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
-    "body_rows": [13, 14, 15, 16, 17, 18, 19, 20],
-    "leg_rows": [21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31],
-    "arm_cols": [9, 10, 11, 20, 21, 22],
-    "leg_split_col": 15
-  },
+
   "part_ids": {
     "head": 1,
     "body": 2,
@@ -60,5 +56,62 @@
     "arm_right": 4,
     "leg_left": 5,
     "leg_right": 6
+  },
+
+  "views": {
+    "_schema": {
+      "part_map": "Ownership in ABSOLUTE image coords. head_rows owns the whole width of those rows; body owns body_rows minus arm_left_cols/arm_right_cols; legs split leg_rows by leg_split_per_row (one entry per leg_rows value, x <= split -> leg_left, x > split -> leg_right). Every opaque pixel belongs to exactly one part, which is what makes the reconstruction invariant hold by construction.",
+      "part_map_zh": "归属用【绝对图像坐标】。head_rows 整宽归头；body 取 body_rows 减去 arm_left_cols/arm_right_cols；腿按 leg_split_per_row 划分 leg_rows（与 leg_rows 一一对应，x <= 分界归 leg_left，x > 分界归 leg_right）。每个不透明像素只属于一个部件 —— 重建不变量因此构造性成立。"
+    },
+
+    "front": {
+      "pixels_file": "chibi_standard_pixels.txt",
+      "sheet_cell": [0, 0],
+      "note": "Legs split at the vertical centre line x15/x16 for every row. The tan/pants colour difference between the two legs is SHADING, not the leg boundary — at x15 the split is symmetric on every row (3/3 at y21, 4/4 at y22-y23, 2/2 below the knee).",
+      "note_zh": "腿在所有行都按垂直中线 x15/x16 划分。两腿的 tan/pants 色差是【明暗】，不是腿界 —— 取 x15 时每行都对称（y21 为 3/3，y22-y23 为 4/4，膝下 2/2）。",
+      "part_map": {
+        "head_rows": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        "body_rows": [13, 14, 15, 16, 17, 18, 19, 20],
+        "leg_rows":  [21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31],
+        "arm_left_cols":  [9, 10, 11],
+        "arm_right_cols": [20, 21, 22],
+        "leg_split_per_row": [15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15]
+      }
+    },
+
+    "side": {
+      "pixels_file": "chibi_standard_side_pixels.txt",
+      "sheet_cell": [0, 2],
+      "note": "Side view: the two legs are genuinely different legs (front leg tan, back leg pants), so the split is the COLOUR boundary and it moves with the drawing — x17 at y21-y22 where both thighs are widest, x15 from y23 down. A flat split would hand the front thigh's outer pixels to the back leg, and walk_side rotates the legs, so those pixels would swing with the wrong leg.",
+      "note_zh": "侧视：两条腿是【真】两条腿（前腿 tan、后腿 pants），所以分界就是颜色边界，且随画面变化 —— y21-y22 两条大腿最宽处取 x17，y23 起取 x15。用统一分界会把前腿外侧像素判给后腿，而 walk_side 会旋转腿，那些像素会跟着错的腿摆。",
+      "part_map": {
+        "head_rows": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        "body_rows": [13, 14, 15, 16, 17, 18, 19, 20],
+        "leg_rows":  [21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31],
+        "arm_left_cols":  [10, 11, 12, 13],
+        "arm_right_cols": [19, 20, 21, 22],
+        "leg_split_per_row": [17, 17, 15, 15, 15, 15, 15, 15, 15, 15, 15]
+      },
+      "anchors": {
+        "leg_right": [19, 21]
+      },
+      "anchors_note": "leg_right overrides defaultPivot, which lands on (18,21) because the bbox is skewed left by the flared boot at y30-y31. The hip joint is the centre of the part's TOP edge (y21 spans x18..x21 -> 19.5 -> 19); pivoting there moves the joint row half as much as pivoting at the corner.",
+      "anchors_note_zh": "leg_right 覆盖 defaultPivot —— 后者落在 (18,21)，因为靴子在 y30-y31 向左外扩，把 bbox 拽偏了。髋关节应在部件【顶边】的中点（y21 占 x18..x21 -> 19.5 -> 19）；绕它转，关节处的位移只有绕角落转的一半。"
+    },
+
+    "back": {
+      "pixels_file": "chibi_standard_back_pixels.txt",
+      "sheet_cell": [0, 4],
+      "note": "Back view is structurally identical to the front: same arm columns, and the legs split at the centre line x15/x16 on every row.",
+      "note_zh": "背视与正面结构完全相同：手臂列一致，腿同样在所有行按中线 x15/x16 划分。",
+      "part_map": {
+        "head_rows": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        "body_rows": [13, 14, 15, 16, 17, 18, 19, 20],
+        "leg_rows":  [21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31],
+        "arm_left_cols":  [9, 10, 11],
+        "arm_right_cols": [20, 21, 22],
+        "leg_split_per_row": [15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15]
+      }
+    }
   }
 }

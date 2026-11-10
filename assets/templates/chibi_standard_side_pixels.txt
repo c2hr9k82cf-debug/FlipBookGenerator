@@ -1,0 +1,49 @@
+# chibi_standard_side_pixels.txt — pixel-exact character template (side)
+# 逐像素角色模板（side）
+#
+# Extracted from reference sheet cell (0,2) — side idle frame 0 (standard standing pose).
+# 取自参考图 (0,2) 格 —— 侧视待机第 0 帧（标准站姿）。
+# 30 rows x 14 cols, placed at x9..x22, y2..y31 in 32x32.
+# 30 行 x 14 列，放在 32x32 的 x9..x22, y2..y31。
+#
+# Palette / 调色板:
+#   @ = outline(46,34,47)       h = hair_mid(247,150,23)    H = hair_dark(251,107,29)
+#   y = hair_highlight(249,194,43)  s = skin(253,203,176)   b = blush(252,167,144)
+#   t = tan(230,144,78)         m = mint(199,220,208)       w = white(255,255,255)
+#   r = red(232,59,59)          p = pants(205,104,61)       g = grey(155,171,178)
+#   G = grey_dark(127,112,138)  T = teal(22,90,76)          . = transparent
+#
+# Part ownership lives in chibi_standard.json (views.<view>.part_map),
+# in absolute image coords — not duplicated here.
+# 部件归属在 chibi_standard.json（views.<view>.part_map）里，用绝对图像坐标
+# —— 此处不重复。
+.....@@@@@....
+....@hyyhy@...
+...@yhhhhhy@..
+..@HhHhhhhhH@.
+..HhhhHHHHhh@.
+.HHhhHb@@bHhH.
+.@HH@H@mTsshh.
+.@HHbssw@ssHh.
+.@HHrssssssH..
+.@HHrrssssH...
+.@HHHrrbbrH...
+..H@@mgbbg@...
+..@ssmmggms@..
+..@sbmwmmwm@..
+.@sb@wwwwwms@.
+.@sb@wwwwwms@.
+.@sbb@mmmm@ss@
+.@ssb@mmmm@ss@
+..@ss@@@@@ss@.
+..@ssttttp@s@.
+..@bbttttp@b@.
+...@@ttppp@@..
+....@tt@@p@...
+....@tt@@p@...
+...@tt@@pp@...
+...@tt@@pp@...
+...@@@@@@@@...
+...@gg@@GG@...
+..@ggg@@GGG@..
+..@@@@..@@@...

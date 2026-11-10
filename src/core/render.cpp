@@ -93,14 +93,13 @@ void blitPart(cv::Mat& frame, const cv::Mat& sprite, const cv::Rect& bbox,
     // Dest pixels to touch: those whose CELL overlaps the transformed bbox,
     // i.e. x < maxXd and x+1 > minXd. That is floor(minXd) ..= ceil(maxXd)-1.
     // The old ceil(maxXd) bound was one pixel too wide on every side: under an
-    // identity pose it walked one row/column past the bbox, and the out-of-bbox
-    // check used to silently skip it. Now that out-of-bbox samples are clamped,
-    // that extra ring would be drawn as a smear of the edge pixel, so the bound
-    // has to be exact.
+    // identity pose it walked one row/column past the bbox and the out-of-bbox
+    // check silently skipped it. Harmless, but iterating exactly the covered
+    // region keeps the rasteriser's cost and its reach in step.
     // 要动的目标像素：其【格子】与变换后的包围盒相交，即 x < maxXd 且 x+1 > minXd，
     // 也就是 floor(minXd) ..= ceil(maxXd)-1。旧的 ceil(maxXd) 每边都宽出一个像素：
-    // 单位位姿下它会多走一圈，以前靠"越界就跳过"蒙混过去。现在越界采样会被夹取，
-    // 那多出来的一圈会画成边缘像素的涂抹，所以边界必须精确。
+    // 单位位姿下会多走一圈，靠"越界就跳过"蒙混过去。倒也无害，但只遍历真正覆盖到的
+    // 区域，光栅化的开销与作用范围才对得上。
     const int x0 = std::max(0, (int)std::floor(minXd));
     const int y0 = std::max(0, (int)std::floor(minYd));
     const int x1 = std::min(frame.cols - 1, (int)std::ceil(maxXd) - 1);
