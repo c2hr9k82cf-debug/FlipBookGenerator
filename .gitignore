@@ -12,3 +12,7 @@ output/
 # Editor swap files / 编辑器临时文件
 *.swp
 *~
+
+# Python bytecode / Python 字节码
+__pycache__/
+*.pyc
