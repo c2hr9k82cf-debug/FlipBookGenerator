@@ -1,0 +1,9 @@
+// version.h.in — generated from CMake project(VERSION ...)
+// 由 CMake 的 project(VERSION ...) 生成。不要手改 version.h。
+//
+// Single source of truth for the version string: CMakeLists.txt.
+// 版本号唯一来源：CMakeLists.txt。banner 和 About 框都用这个宏。
+
+#pragma once
+
+#define FLIPBOOK_VERSION "@PROJECT_VERSION@"

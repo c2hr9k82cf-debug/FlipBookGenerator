@@ -6,6 +6,7 @@
 #include "utils.h"
 #include <opencv2/opencv.hpp>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <vector>
 #include <string>
@@ -506,6 +507,17 @@ int runExtractPartsMode() {
     const std::string outputDir = "output/parts";
     fs::create_directories(outputDir);
 
+    // Remember the source image path and each part's placement so the parts can
+    // be composed back later. Without these the cropped PNGs have no position.
+    // 记录源图路径与各部件位置，否则裁剪出的 PNG 无法还原到原位。
+    std::ofstream pathFile(outputDir + "/image_path.txt");
+    pathFile << imagePath << "\n";
+    pathFile.close();
+
+    std::ofstream anchorFile(outputDir + "/anchors.txt");
+    anchorFile << "# Pivot points / 旋转锚点\n";
+    anchorFile << "# partId x y   (one pivot per part, in original-image coords)\n";
+
     for (const auto& part : PARTS) {
         // Create mask for this part
         // 创建此部件的掩膜
@@ -540,8 +552,20 @@ int runExtractPartsMode() {
         cv::imwrite(outputFile, cropped);
         std::cout << "  Saved: " << outputFile
                   << " (" << cropped.cols << "x" << cropped.rows << ")" << std::endl;
+
+        // Save placement metadata alongside the sprite
+        // 在精灵图旁保存位置元数据
+        std::ofstream bboxFile(outputDir + "/" + part.name + "_bbox.txt");
+        bboxFile << bbox.x << " " << bbox.y << " "
+                 << bbox.width << " " << bbox.height << "\n";
+        bboxFile.close();
+
+        cv::Point pivot = defaultPivot(part.id, bbox);
+        anchorFile << part.id << " " << pivot.x << " " << pivot.y << "\n";
     }
+    anchorFile.close();
 
     std::cout << "\nParts extracted to: " << outputDir << std::endl;
+    std::cout << "Metadata: image_path.txt, *_bbox.txt (x y w h), anchors.txt (partId x y)" << std::endl;
     return 0;
 }

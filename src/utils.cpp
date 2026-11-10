@@ -22,3 +22,22 @@ std::string getPartName(int id) {
     }
     return "unknown";
 }
+
+// Default rotation pivot for a part, given its bounding box in original-image
+// coordinates. See utils.h for the per-part joint rationale.
+// 返回部件默认旋转锚点（原图坐标）。各部件关节说明见 utils.h。
+cv::Point defaultPivot(int partId, const cv::Rect& bbox) {
+    const int centerX = bbox.x + (bbox.width  - 1) / 2;
+    const int topY    = bbox.y;
+    const int bottomY = bbox.y + bbox.height - 1;
+
+    switch (partId) {
+        case 1: return cv::Point(centerX, bottomY);       // head: neck / 头：颈部
+        case 2: return cv::Point(centerX, topY);          // body: shoulders / 躯干：肩线
+        case 3: return cv::Point(bbox.x + bbox.width - 1, topY);  // arm_left: shoulder on torso side
+        case 4: return cv::Point(bbox.x, topY);                   // arm_right: shoulder on torso side
+        case 5:                                                  // leg_left: hip / 腿：胯
+        case 6: return cv::Point(centerX, topY);                 // leg_right: hip / 腿：胯
+        default: return cv::Point(centerX, topY + bbox.height / 2);
+    }
+}
