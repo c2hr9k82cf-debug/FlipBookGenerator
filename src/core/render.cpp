@@ -288,8 +288,11 @@ void fillInteriorHoles(cv::Mat& frame, cv::Mat& owner) {
 //        正面的腿轮廓在 (11,24) 收进一格，整体起伏时它跟着腿走，从来不是损伤。
 //
 //   (2) THE SOURCE had those pixels opaque — the neutral pose carried a pixel
-//       there and this frame dropped it.
+//       there and this frame dropped it. Measured in the SOURCE'S OWN FRAME:
+//       the query is offset by the pose's global translation (rootX, rootY).
 //   （2）【原图】该处不透明 —— 静止姿势本来有这个像素，这一帧把它弄丢了。
+//        查询在【原图自己的参考系】里做：按位姿的整体平移 (rootX, rootY) 反向
+//        偏移后再去原图取。
 //
 // Each test alone is WRONG, and both counterexamples are in this project
 // already / 单用任何一个都错，两个反例本项目里都有:
@@ -305,17 +308,31 @@ void fillInteriorHoles(cv::Mat& frame, cv::Mat& owner) {
 //   (2) alone is anchored to coordinates, so it compares a gap against the
 //       pixel the neutral pose had SOMEWHERE ELSE once the character moves.
 //       Measured on the idle bob — every part shifted by the same 2px, which
-//       cannot tear anything — it still reported damage at (11,22) and filled
-//       a hole the artist drew.
+//       cannot tear anything — an unshifted query reported damage at (11,22)
+//       and filled a hole the artist drew.
 //   （2）单用锚死在坐标上，角色一动，它就拿空隙去比静止姿势在【别处】的像素。
-//        实测整体起伏 —— 所有部件位移同为 2px，根本撕不开任何东西 —— 它照样在
-//        (11,22) 报出损伤，并把画师画的缺口填掉。
+//        实测整体起伏 —— 所有部件位移同为 2px，根本撕不开任何东西 —— 不做偏移的
+//        查询照样在 (11,22) 报出损伤，并把画师画的缺口填掉。
 //
-// Together they are exact on every case measured, and (2) makes this a PROVABLE
-// no-op at an identity pose: there the frame IS the source, so every transparent
-// run fails (2). That is what keeps the reconstruction invariant intact.
-// 两者合用在所有实测情形上都正确；且 (2) 让本函数在单位位姿下【可证明】是恒等
-// 操作：那时画面【就是】原图，任何透明段都过不了 (2)。重建不变量因此不受影响。
+// The offset in (2) is what disposes of that counterexample. The source is
+// drawn in the character's neutral frame; a frame that is only a global bob
+// away from it must be compared against the source shifted by the same
+// amount. With the offset, a pure translation can never report damage — the
+// frame IS the source moved, so every transparent run lands on a transparent
+// source pixel and fails (2). That is what makes the idle animation provably
+// untouched by this pass, and it is checked, not assumed: --idle-purity
+// asserts every idle frame is an exact translation of the source.
+// （2）里的偏移正是那个反例的解法。原图画在角色的静止参考系里；画面若只是整体
+//      起伏的结果，就必须拿【同样平移过】的原图去比。加上偏移后，纯平移不可能
+//      报出损伤 —— 画面就是移动过的原图，任何透明段都落在原图的透明像素上，
+//      过不了 (2)。这使待机动作可证明不受本函数影响；而且这是【验过】的，不是
+//      假设的：--idle-purity 断言每一帧待机都是原图的精确平移。
+//
+// Together they are exact on every case measured, and (2) still makes this a
+// PROVABLE no-op at an identity pose (the offset is zero there and the frame
+// IS the source). That is what keeps the reconstruction invariant intact.
+// 两者合用在所有实测情形上都正确；(2) 仍让本函数在单位位姿下【可证明】是恒等
+// 操作（那里偏移为零，画面就是原图）。重建不变量因此不受影响。
 //
 // Why vertical only / 为何只补竖向:
 //   The safe primitives pin the JOINTS — neck, shoulder, hip — which stack
@@ -339,7 +356,8 @@ void fillInteriorHoles(cv::Mat& frame, cv::Mat& owner) {
 // reconstruction invariant intact — checked by --recon-test on all three rigs.
 // 单位位姿下每个部件都严丝合缝地贴着邻居，不存在跨部件的空段，于是这里是恒等
 // 操作。重建不变量因此不受影响 —— 三套 rig 的 --recon-test 都验过。
-void fillJointPinches(cv::Mat& frame, const cv::Mat& owner, const cv::Mat& source) {
+void fillJointPinches(cv::Mat& frame, const cv::Mat& owner, const cv::Mat& source,
+                      int shiftX, int shiftY) {
     const int W = frame.cols, H = frame.rows;
     const bool haveSource = !source.empty()
         && source.rows == H && source.cols == W;
@@ -366,13 +384,22 @@ void fillJointPinches(cv::Mat& frame, const cv::Mat& owner, const cv::Mat& sourc
             const uchar ob = owner.at<uchar>(y1 + 1, x);
             if (oa == ob) continue;
 
-            // Test 2 — the neutral pose carried pixels here. Without a source
-            // there is no way to tell art from artifact, so repair nothing.
-            // 条件 2 —— 静止姿势此处有像素。没有原图就分不清画法与损伤，宁可不补。
+            // Test 2 — the neutral pose carried pixels here, QUERIED IN THE
+            // SOURCE'S OWN FRAME. Without a source there is no way to tell art
+            // from artifact, so repair nothing. A query that falls outside the
+            // source counts as transparent: there is no evidence the pixel was
+            // ever there, and under-filling leaves a visible tear while
+            // over-filling silently redraws art — so err toward not filling.
+            // 条件 2 —— 静止姿势此处有像素，【在原图自己的参考系里查】。没有原图
+            // 就分不清画法与损伤，宁可不补。查到原图之外算作透明：没有证据表明
+            // 那里曾有过像素，而少补只留一道看得见的裂，多补却悄悄重画了原画
+            // —— 所以宁可不补。
             if (!haveSource) continue;
             bool lost = true;
             for (int yy = y0; yy <= y1; ++yy) {
-                if (source.at<cv::Vec4b>(yy, x)[3] == 0) { lost = false; break; }
+                const int syy = yy - shiftY, sxx = x - shiftX;
+                if (syy < 0 || syy >= H || sxx < 0 || sxx >= W) { lost = false; break; }
+                if (source.at<cv::Vec4b>(syy, sxx)[3] == 0) { lost = false; break; }
             }
             if (!lost) continue;
 
@@ -402,7 +429,13 @@ cv::Mat composeFrame(const Rig& rig, const Pose& pose) {
         blitPart(frame, owner, i + 1, rig.parts[i], rig.bbox[i], m);
     }
     fillInteriorHoles(frame, owner);                  // enclosed seams / 封闭缝
-    fillJointPinches(frame, owner, rig.source);       // tears / 撕裂
+    // Tears are judged against the source in ITS OWN frame, so undo the pose's
+    // global translation before looking a pixel up. Rounds the same way the
+    // rasteriser does, or the two would disagree at the halves.
+    // 撕裂要拿【原图自己的参考系】来判，所以查像素前先撤掉位姿的整体平移。
+    // 取整方式与光栅化器一致，否则在 .5 处会对不上。
+    fillJointPinches(frame, owner, rig.source,
+                     (int)std::lround(pose.rootX), (int)std::lround(pose.rootY));
     return frame;
 }
 

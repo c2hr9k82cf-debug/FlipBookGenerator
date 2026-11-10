@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(FlipBookGenerator VERSION 0.5.4 LANGUAGES CXX)
+project(FlipBookGenerator VERSION 0.5.5 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -68,6 +68,19 @@ foreach(view front side back)
     add_test(
         NAME reconstruction_${view}
         COMMAND flipbook --recon-test --bundle
+                ${CMAKE_CURRENT_SOURCE_DIR}/${bundle}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    # The pinch/tear gate. A uniform bob cannot pull parts apart, so the seam
+    # repair has to leave every idle frame byte-identical to the source moved.
+    # Over-filling (redrawing the artist's notch) and under-filling (a missed
+    # tear) both show up here as a frame that is no longer a translation.
+    # 撕裂闸门。整体起伏拉不开部件，所以补缝必须让每帧待机与【移动过的源图】
+    # 逐字节相同。多补（把画师的缺口重画）与少补（漏掉的撕裂）都会让该帧不再是
+    # 平移，从而在这里现形。
+    add_test(
+        NAME idle_purity_${view}
+        COMMAND flipbook --idle-purity --bundle
                 ${CMAKE_CURRENT_SOURCE_DIR}/${bundle}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
