@@ -16,7 +16,8 @@ Turn AI-generated pixel-art character images into flipbook animations, entirely 
 | Mode 1: multi-image → sprite sheet + preview / 多图拼表 + 预览 | ✅ works |
 | Mode 2: single image → 6 body parts + placement metadata / 单图提取部件 + 位置元数据 | ✅ works |
 | Grid editor (paint / erase / k-means auto-detect / overview) / 格子编辑器 | ✅ works |
-| **Animation generation / 动画生成** | ❌ **not built** — this is the goal |
+| **Animation core engine (Phase 1) / 动画核心引擎** | ✅ **works** — 4 presets, reconstruction + detach gates pass |
+| GUI wizard + `.app` (Phase 2–5) / GUI 向导 + 打包 | ❌ not built — next |
 
 The CLI mode menu in `src/main.cpp` is **temporary**. It is being replaced by a
 guided wizard GUI with a double-clickable `.app`. Do not add features to the menu.
@@ -197,6 +198,19 @@ Non-negotiable. Encode in `src/core/transform.cpp` and never violate in the rend
   Semi-transparent edge blending instantly breaks pixel perfection.
 - Off-multiple-of-90° rotations look chunky. That is the idiom, not a bug. Alt snaps
   to 15° in the editor.
+- **DETACH RULE / 脱节铁律**: a part must never translate away from its neighbour.
+  Safe primitives: `rootX/rootY` (all parts move together), `rotateDeg` (about the
+  part's own joint — the joint stays pinned), `scaleY` (shortens from the far end
+  with the joint pinned). Per-part `moveX/moveY` is unsafe and the presets never
+  use it. A 1px gap at a joint is the ugliest artifact this renderer can produce.
+  / 部件绝不可平移着离开相邻部件。安全动作：`rootX/rootY`（整体动）、`rotateDeg`
+  （绕自身关节转，关节钉住）、`scaleY`（从远端缩短，关节钉住）。部件级
+  `moveX/moveY` 不安全，预设不用它。关节开 1px 缝是本渲染器最难看的产物。
+- **Amplitude & rounding / 幅度与取整**: a 1px bob flattens — `lround` maps all
+  lerped in-between frames to the same offset. Use ≥2px for any positional
+  amplitude so the wave triangulates cleanly through the pixels (0,-1,-2,-1,...).
+  / 起伏 1px 会被取整压平（所有中间帧落到同一偏移）。位置幅度至少 2px，
+  波形才能在像素上走出干净的三角波。
 
 ### ⚠️ Quality expectation / 质量预期
 
@@ -303,19 +317,27 @@ FlipBookGenerator/
 ├── docs/
 │   └── lost-animator-symbols.txt   # forensic record of lost work
 ├── src/
-│   ├── main.cpp            # TEMPORARY CLI menu + future CLI arg dispatch
+│   ├── main.cpp            # CLI arg dispatch (--recon-test, --preset) + TEMPORARY menu
 │   ├── version.h.in        # generated to build/generated/version.h
 │   ├── utils.h/cpp         # PartDef, PARTS, defaultPivot()
 │   ├── spritesheet.h/cpp   # Mode 1: multi-image sprite sheet + preview
-│   └── extractor.h/cpp     # Mode 2: grid editor + part extraction
+│   ├── extractor.h/cpp     # Mode 2: grid editor + part extraction
+│   └── core/               # Animation engine, no UI dependency
+│       ├── core.h          # PartTransform/Pose/Keyframe/Animation/Rig
+│       ├── rig.cpp         # load part bundles
+│       ├── animation.cpp   # interpolation + 4 preset generators
+│       ├── render.cpp      # inverse-mapping nearest-neighbour rasteriser
+│       └── export.cpp      # frames + spritesheet writer
 ├── tests/
 │   └── fixtures/character_32/      # committed verified part bundle
+├── tools/
+│   └── make_test_character.py      # authors the 32x32 test character pixel-by-pixel
 ├── assets/                 # input images
 └── output/                 # 100% generated, 100% gitignored
 ```
 
-Planned additions / 计划新增：`src/core/` (UI-free engine), `src/extract/` (algorithms),
-`src/ui/` (ImGui wizard), `third_party/`, `build_app.sh`, `CMakeLists.txt` target split.
+Planned additions / 计划新增：`src/extract/` (algorithms),
+`src/ui/` (ImGui wizard), `third_party/`, `build_app.sh`.
 
 ## Build / 构建
 
