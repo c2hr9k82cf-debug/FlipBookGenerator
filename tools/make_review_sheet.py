@@ -21,8 +21,19 @@
 # 仅开发用 Pillow。产品本身不依赖 Python。
 #
 # Usage / 用法:
-#   python3 -I tools/make_review_sheet.py                # everything into output/review/
-#   python3 -I tools/make_review_sheet.py /tmp/peek      # somewhere else to look
+#   python3 -I tools/make_review_sheet.py                  # all three views
+#   python3 -I tools/make_review_sheet.py --view side       # one view only
+#   python3 -I tools/make_review_sheet.py /tmp/peek         # another output dir
+#
+# Three views, three rigs / 三视图、三套 rig:
+#   front rig -> idle + walk_front (walks DOWN / 向下)
+#   side  rig -> idle + walk_side  (walks RIGHT / 向右)
+#   back  rig -> idle + walk_up    (walks UP / 向上)
+# Left is a horizontal mirror of right and is produced at EXPORT time (A6), not
+# here. 左走是右走的水平镜像，在【导出】阶段（A6）产出，不在此处。
+#
+# Output / 输出:  OUT/<view>/*.png + anim_<view>_<preset>.gif
+# Frames read from / 帧取自:  output/preview/<view>/<preset>/frame_N.png
 
 import json
 import os
@@ -31,33 +42,62 @@ import sys
 from PIL import Image, ImageDraw, ImageFont
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "output", "review")
+
+# --- CLI / 命令行 ---
+_argv = sys.argv[1:]
+OUT = os.path.join(ROOT, "output", "review")
+VIEW_ARG = "all"
+_rest = []
+_i = 0
+while _i < len(_argv):
+    if _argv[_i] == "--view":
+        if _i + 1 >= len(_argv):
+            sys.exit("ERROR: --view needs front|side|back|all")
+        VIEW_ARG = _argv[_i + 1]
+        _i += 2
+    else:
+        _rest.append(_argv[_i])
+        _i += 1
+if _rest:
+    OUT = _rest[0]
+if VIEW_ARG not in ("front", "side", "back", "all"):
+    sys.exit(f"ERROR: unknown view {VIEW_ARG!r}, expected front|side|back|all")
 
 SIZE = 32                      # canonical canvas / 标准画布
 ORIGIN_X, ORIGIN_Y = 9, 2      # content placement in canvas / 内容在画布中的位置
 
-# Part ownership, mirroring tests/fixtures/character_32/*_bbox.txt and the
-# header of chibi_standard_pixels.txt. Kept explicit so a mismatch is loud.
-# 部件归属，与夹具 bbox 和像素图注释一致。写成显式数据，不一致时立刻暴露。
-PART_REGIONS = [
-    ("head",      1, 9,  2,  14, 11, (255,  99,  71)),
-    ("body",      2, 12, 13,  8,  8, ( 60, 170, 255)),
-    ("arm_left",  3, 9,  13,  3,  8, (255, 200,  60)),
-    ("arm_right", 4, 20, 13,  3,  8, (255, 140,  26)),
-    ("leg_left",  5, 10, 21,  6, 11, (150, 220, 120)),
-    ("leg_right", 6, 16, 21,  6, 11, (200, 130, 255)),
-]
+VIEWS = ("front", "side", "back")
 
-# Rotation pivots from tests/fixtures/character_32/anchors.txt
-# 旋转锚点，取自夹具 anchors.txt
-ANCHORS = [(1, 15, 12), (2, 15, 13), (3, 11, 13), (4, 20, 13), (5, 12, 21), (6, 18, 21)]
+# One colour per part id, for the ownership tint. Purely cosmetic — this is
+# not the character's palette, which lives in chibi_standard.json.
+# 每部件一色，用于归属着色。纯装饰 —— 这不是角色调色板（那在 chibi_standard.json）。
+PART_COLOURS = {
+    1: (255,  99,  71), 2: ( 60, 170, 255), 3: (255, 200,  60),
+    4: (255, 140,  26), 5: (150, 220, 120), 6: (200, 130, 255),
+}
+PART_NAMES = {1: "head", 2: "body", 3: "arm_left",
+              4: "arm_right", 5: "leg_left", 6: "leg_right"}
 
-PRESETS = ["idle", "walk_side", "walk_front", "walk_up"]
+# Each view animates with its own walk preset — the one whose motion matches
+# the direction that view reads as. Applying walk_side to a front rig is a
+# combination the tool never ships, so it is not reviewed here either.
+# 每个视图用【它自己方向】的走路预设。把 walk_side 套到正面 rig 上是本工具从不
+# 产出的组合，所以也不在这里审。
+VIEW_PRESETS = {
+    "front": ["idle", "walk_front"],
+    "side":  ["idle", "walk_side"],
+    "back":  ["idle", "walk_up"],
+}
 PRESET_LABELS = {
     "idle":       "idle / 待机",
     "walk_side":  "walk_side / 侧走（→ 右走）",
     "walk_front": "walk_front / 正走（↓ 向下）",
     "walk_up":    "walk_up / 背走（↑ 向上）",
+}
+VIEW_LABELS = {
+    "front": "front / 正面",
+    "side":  "side / 侧面",
+    "back":  "back / 背面",
 }
 GIF_MS = {"idle": 125, "walk_side": 100, "walk_front": 100, "walk_up": 100}
 # Frame rates match the reference sheet (and src/core/animation.cpp): idle is
@@ -66,6 +106,16 @@ GIF_MS = {"idle": 125, "walk_side": 100, "walk_front": 100, "walk_up": 100}
 # 帧率对齐参考图（以及 src/core/animation.cpp）：idle 2 帧 @ 4fps = 一秒一次呼吸，
 # walk 6 帧 @ 10fps = 一步 600ms。它们决定 GIF 的播放速度。
 PRESET_FPS = {"idle": 4, "walk_side": 10, "walk_front": 10, "walk_up": 10}
+
+# --- Per-view state, set by select_view() / 按视图状态，由 select_view() 设定 ---
+#
+# The drawing code reads these and needs no per-view branching of its own.
+# 绘图代码读它们，自身无需按视图分支。
+VIEW = "front"
+PART_REGIONS = []   # (name, pid, x, y, w, h, colour) / 部件归属
+ANCHORS = []        # (pid, x, y) / 旋转锚点
+PRESETS = []        # this view's preset names / 本视图的预设名
+BUNDLE = ""         # this view's fixture dir / 本视图的夹具目录
 
 
 # ---------------------------------------------------------------------------
@@ -102,24 +152,66 @@ F_TINY = load_font(11)
 # Template loading / 载入模版
 # ---------------------------------------------------------------------------
 
-def load_template():
-    """Render chibi_standard_pixels.txt through chibi_standard.json's palette.
-    用 chibi_standard.json 的调色板渲染 chibi_standard_pixels.txt。"""
+def select_view(view):
+    """Load one view's part data into the module globals; return its bundle dir.
+    把某个视图的部件数据载入模块全局量，返回它的夹具目录。
+
+    Part regions and pivots are READ BACK from the committed fixture rather
+    than kept as constants here. The fixture is the interface the engine
+    consumes (CLAUDE.md: "the part bundle is the project's interface"), so
+    reading it back is what keeps this review sheet from drifting away from
+    what the renderer actually used.
+    部件区域与锚点从【已提交的夹具】回读，不在这里写常量。夹具是引擎消费的接口
+    （CLAUDE.md："部件包是提取与动画之间的接口"），回读它才使本审阅图不会与渲染器
+    实际使用的数据脱节。
+    """
+    global VIEW, PART_REGIONS, ANCHORS, PRESETS, BUNDLE
+    VIEW = view
+    suffix = "" if view == "front" else "_" + view
+    bundle = os.path.join(ROOT, "tests", "fixtures", "character_32" + suffix)
+    BUNDLE = bundle
+
+    regions = []
+    for pid in range(1, 7):
+        name = PART_NAMES[pid]
+        with open(os.path.join(bundle, f"{name}_bbox.txt")) as f:
+            x, y, w, h = (int(v) for v in f.read().split())
+        regions.append((name, pid, x, y, w, h, PART_COLOURS[pid]))
+    PART_REGIONS = regions
+
+    anchors = []
+    with open(os.path.join(bundle, "anchors.txt")) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            pid, x, y = (int(v) for v in line.split())
+            anchors.append((pid, x, y))
+    ANCHORS = anchors
+
+    PRESETS = list(VIEW_PRESETS[view])
+    return bundle
+
+
+def load_template(view):
+    """Render the view's pixel map through chibi_standard.json's palette.
+    用 chibi_standard.json 的调色板渲染该视图的像素图。"""
     with open(os.path.join(ROOT, "assets", "templates", "chibi_standard.json")) as f:
         spec = json.load(f)
     palette = {k: tuple(v) for k, v in spec["palette"].items()}
     char_map = spec["palette_chars"]
 
     rows = []
-    with open(os.path.join(ROOT, "assets", "templates", "chibi_standard_pixels.txt")) as f:
+    pixels_file = spec["views"][view]["pixels_file"]
+    with open(os.path.join(ROOT, "assets", "templates", pixels_file)) as f:
         for line in f:
             line = line.rstrip("\n")
             if not line or line.lstrip().startswith("#"):
                 continue
             rows.append(line)
 
-    assert len(rows) == 30, f"expected 30 pixel rows, got {len(rows)}"
-    assert all(len(r) == 14 for r in rows), "each row must be 14 chars wide"
+    assert len(rows) == 30, f"{view}: expected 30 pixel rows, got {len(rows)}"
+    assert all(len(r) == 14 for r in rows), f"{view}: each row must be 14 chars wide"
 
     im = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
     px = im.load()
@@ -136,9 +228,10 @@ def load_template():
 
 
 def check_against_asset(rendered):
-    """The template PNG must equal assets/character_32.png, pixel-exact.
-    模版 PNG 必须与 assets/character_32.png 逐像素相同。"""
-    ref = Image.open(os.path.join(ROOT, "assets", "character_32.png")).convert("RGBA")
+    """The rendered template must equal assets/character_32{,_side,_back}.png.
+    渲染出的模版必须与 assets/character_32{,_side,_back}.png 逐像素相同。"""
+    suffix = "" if VIEW == "front" else "_" + VIEW
+    ref = Image.open(os.path.join(ROOT, "assets", f"character_32{suffix}.png")).convert("RGBA")
     if ref.size != rendered.size:
         return False, f"size mismatch {ref.size} vs {rendered.size}"
     a, b = ref.load(), rendered.load()
@@ -150,16 +243,22 @@ def check_against_asset(rendered):
     return (not bad), ("" if not bad else f"{len(bad)} differing px, first {bad[0]}")
 
 
-def check_regions(spec):
-    """Part regions must match the committed fixture's bbox files.
-    部件区域必须与已提交夹具的 bbox 文件一致。"""
+def check_sprite_sizes():
+    """Every part sprite must be exactly its bbox size — loadRigFromDir rejects
+    the bundle otherwise, and a sprite that is off by one will be blitted at
+    the wrong place with no other symptom.
+    每个部件精灵必须与 bbox 尺寸严格一致 —— 否则 loadRigFromDir 会拒收整个部件包；
+    而差一个像素的精灵会被贴到错位的地方，且没有别的症状。"""
     problems = []
     for name, pid, x, y, w, h, _c in PART_REGIONS:
-        path = os.path.join(ROOT, "tests", "fixtures", "character_32", f"{name}_bbox.txt")
-        with open(path) as f:
-            fx, fy, fw, fh = (int(v) for v in f.read().split())
-        if (fx, fy, fw, fh) != (x, y, w, h):
-            problems.append(f"{name}: fixture {fx},{fy},{fw},{fh} vs review {x},{y},{w},{h}")
+        png = os.path.join(BUNDLE, f"{name}.png")
+        try:
+            im = Image.open(png)
+        except Exception as e:
+            problems.append(f"{name}: cannot read {png} ({e})")
+            continue
+        if (im.width, im.height) != (w, h):
+            problems.append(f"{name}: sprite {im.width}x{im.height} vs bbox {w}x{h}")
     return problems
 
 
@@ -228,7 +327,7 @@ def build_template_sheet(rendered):
     sheet = Image.new("RGB", (W, H), (248, 249, 251))
     d = ImageDraw.Draw(sheet, "RGBA")
 
-    text(d, (pad, 14), "chibi_standard — template / 模版图（32x32，12x 最近邻放大）", F_TITLE)
+    text(d, (pad, 14), f"chibi_standard — {VIEW_LABELS[VIEW]} template / 模版图（32x32，12x 最近邻放大）", F_TITLE)
 
     # Panel A: the template itself on a checkerboard, with pixel grid.
     # 面板 A：模版本体，棋盘格底 + 像素网格。
@@ -274,7 +373,7 @@ def build_template_sheet(rendered):
     text(d, (pad, ly + 72), "reconstruction gate: 6 parts blit back pixel-exact (0 diff) / 重建门禁：6 部件贴回逐像素一致（0 差异）", F_SMALL, (40, 120, 70))
     text(d, (pad, ly + 92), "grid: light = 1px, heavy = 4px  ·  magnification is nearest-neighbour / 网格：细=1px，粗=4px · 放大为最近邻", F_SMALL, (90, 95, 105))
 
-    out = os.path.join(OUT, "template_sheet.png")
+    out = out_path("template_sheet.png")
     sheet.save(out)
     return out
 
@@ -293,7 +392,7 @@ def build_parts_sheet(rendered, bundle_dir):
 
     sheet = Image.new("RGB", (W, H), (248, 249, 251))
     d = ImageDraw.Draw(sheet, "RGBA")
-    text(d, (pad, 14), "parts + pivots / 部件拆解 + 锚点（8x 最近邻）", F_TITLE)
+    text(d, (pad, 14), f"parts + pivots — {VIEW_LABELS[VIEW]} / 部件拆解 + 锚点（8x 最近邻）", F_TITLE)
 
     for idx, (name, pid, x, y, w, h, col) in enumerate(PART_REGIONS):
         cx = pad + (idx % cols) * (cell + gap)
@@ -328,7 +427,7 @@ def build_parts_sheet(rendered, bundle_dir):
         text(d, (cx, cy + cell + 26), f"bbox=({x},{y}) {w}x{h}   pivot=({[a[1] for a in ANCHORS if a[0]==pid][0]},{[a[2] for a in ANCHORS if a[0]==pid][0]})", F_TINY, (95, 100, 110))
         text(d, (cx, cy + cell + 42), note, F_TINY, (95, 100, 110))
 
-    out = os.path.join(OUT, "parts_sheet.png")
+    out = out_path("parts_sheet.png")
     sheet.save(out)
     return out
 
@@ -337,11 +436,21 @@ def build_parts_sheet(rendered, bundle_dir):
 # Sheet 3 — every preset, every frame / 全部预设全部帧
 # ---------------------------------------------------------------------------
 
+def out_path(name):
+    """Every sheet lands in OUT/<view>/ so three views never overwrite each
+    other. 每张审阅图都落在 OUT/<view>/ 下，三个视图互不覆盖。"""
+    d = os.path.join(OUT, VIEW)
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, name)
+
+
 def load_frames(name):
+    """Frames the engine wrote for THIS view's bundle + this preset.
+    引擎为【本视图】的部件包 + 该预设写出的帧。"""
     paths = []
     i = 0
     while True:
-        p = os.path.join(ROOT, "output", "preview", name, f"frame_{i}.png")
+        p = os.path.join(ROOT, "output", "preview", VIEW, name, f"frame_{i}.png")
         if not os.path.exists(p):
             break
         paths.append(p)
@@ -360,7 +469,7 @@ def build_review_sheet():
 
     sheet = Image.new("RGB", (W, H), (248, 249, 251))
     d = ImageDraw.Draw(sheet, "RGBA")
-    text(d, (pad, 12), "preset animations — every frame / 预设动画逐帧（5x 最近邻）", F_TITLE)
+    text(d, (pad, 12), f"preset animations — {VIEW_LABELS[VIEW]} every frame / 预设动画逐帧（5x 最近邻）", F_TITLE)
     text(d, (pad, 36), "watch for: detach gaps at joints, missing pixels, wrong z-order, chunky rotation reads as intended / "
                        "重点看：关节脱节缝、丢像素、层级错误；非 90° 旋转的锯齿感是像素风惯例，不是 bug", F_SMALL, (95, 100, 110))
 
@@ -369,7 +478,7 @@ def build_review_sheet():
         text(d, (pad, ry + 10), PRESET_LABELS[name], F_BODY)
         fs = load_frames(name)
         text(d, (pad, ry + 32), f"{len(fs)} frames @ {PRESET_FPS[name]}fps", F_SMALL, (95, 100, 110))
-        text(d, (pad, ry + 50), f"→ output/preview/{name}/", F_TINY, (150, 155, 165))
+        text(d, (pad, ry + 50), f"→ output/preview/{VIEW}/{name}/", F_TINY, (150, 155, 165))
         for i, fr in enumerate(fs):
             fx = pad + label_w + i * (fw + gap)
             sheet.paste(paste_on_checker(scale_nn(fr, k)), (fx, ry))
@@ -379,7 +488,7 @@ def build_review_sheet():
         fx0 = pad + label_w
         d.rectangle([fx0 - 2, ry - 2, fx0 + fw + 1, ry + fw + 1], outline=(230, 120, 40), width=2)
 
-    out = os.path.join(OUT, "review_sheet.png")
+    out = out_path("review_sheet.png")
     sheet.save(out)
     return out
 
@@ -395,9 +504,6 @@ JOINT_WINDOWS = [
     ("torso / 躯干  y9-19", 8, 9, 16, 11),
     ("hips+legs / 髋腿  y18-28", 8, 18, 16, 11),
 ]
-JOINT_PRESETS = ["idle", "walk_side", "walk_front"]
-
-
 def build_joint_sheet():
     k = 8
     ww, wh = 16 * k, 11 * k
@@ -405,17 +511,17 @@ def build_joint_sheet():
     cols = 8
 
     W = pad * 2 + label_w + cols * (ww + gap)
-    rows = len(JOINT_PRESETS) * len(JOINT_WINDOWS)
+    rows = len(PRESETS) * len(JOINT_WINDOWS)
     H = title_h + rows * (wh + 22 + row_gap) + 24
 
     sheet = Image.new("RGB", (W, H), (248, 249, 251))
     d = ImageDraw.Draw(sheet, "RGBA")
-    text(d, (pad, 12), "joint close-ups / 关节特写（8x 最近邻）", F_TITLE)
+    text(d, (pad, 12), f"joint close-ups — {VIEW_LABELS[VIEW]} / 关节特写（8x 最近邻）", F_TITLE)
     text(d, (pad, 38), "the ugly artifact is a 1px gap at a joint / 最难看的产物是关节处 1px 缝 —— "
                        "看每格的肩、颈、髋处有没有背景色漏进来", F_SMALL, (95, 100, 110))
 
     r = 0
-    for name in JOINT_PRESETS:
+    for name in PRESETS:
         fs = load_frames(name)
         for wlabel, wx, wy, ww_, wh_ in JOINT_WINDOWS:
             ry = title_h + r * (wh + 22 + row_gap)
@@ -430,7 +536,7 @@ def build_joint_sheet():
                 text(d, (fx + 3, ry + wh + 3), f"f{i}", F_TINY, (120, 125, 135))
             r += 1
 
-    out = os.path.join(OUT, "joint_sheet.png")
+    out = out_path("joint_sheet.png")
     sheet.save(out)
     return out
 
@@ -496,7 +602,7 @@ def run_detach_check():
     """Print one line per preset per frame. Fails loud on gaps or holes.
     每预设每帧一行。有缝或有洞就大声报错。"""
     print()
-    print("[detach] frame analysis — expect 1 blob, 0 holes / 期望 1 块、0 洞")
+    print(f"[detach:{VIEW}] frame analysis — expect 1 blob, 0 holes / 期望 1 块、0 洞")
     any_bad = False
     for name in PRESETS:
         fs = load_frames(name)
@@ -538,7 +644,7 @@ def build_gifs():
         # so the colours do not shimmer. 所有帧共用调色板，避免颜色闪烁。
         base = big[0].convert("P", palette=Image.ADAPTIVE, colors=64)
         pframes = [im.quantize(palette=base, dither=Image.NONE) for im in big]
-        out = os.path.join(OUT, f"anim_{name}.gif")
+        out = out_path(f"anim_{VIEW}_{name}.gif")
         pframes[0].save(
             out,
             save_all=True,
@@ -556,23 +662,24 @@ def build_gifs():
 # Main / 主流程
 # ---------------------------------------------------------------------------
 
-def main():
-    os.makedirs(OUT, exist_ok=True)
-    rendered, spec = load_template()
+def review_view(view):
+    """All sheets plus the detach gate for one view. Returns the gate's verdict.
+    一个视图的全部审阅图加脱节闸门。返回闸门结论。"""
+    suffix = "" if view == "front" else "_" + view
+    bundle = select_view(view)
+    rendered, _spec = load_template(view)
 
     ok, detail = check_against_asset(rendered)
-    print(f"[template] render vs assets/character_32.png: "
+    print(f"[template] render vs assets/character_32{suffix}.png: "
           f"{'PASS (pixel-exact)' if ok else 'FAIL — ' + detail}")
     if not ok:
         print("  !! template is NOT the committed asset; fix before judging animation")
 
-    region_problems = check_regions(spec)
-    print(f"[regions]  part regions vs fixture bbox: "
-          f"{'PASS (all 6 match)' if not region_problems else 'FAIL'}")
-    for p in region_problems:
+    size_problems = check_sprite_sizes()
+    print(f"[sprites]  part sprite size vs bbox: "
+          f"{'PASS (all 6 match)' if not size_problems else 'FAIL'}")
+    for p in size_problems:
         print("  !!", p)
-
-    bundle = os.path.join(ROOT, "tests", "fixtures", "character_32")
 
     print()
     print("template :", build_template_sheet(rendered))
@@ -581,10 +688,29 @@ def main():
     print("joints   :", build_joint_sheet())
     for g in build_gifs():
         print("gif      :", g)
-    run_detach_check()
+    return run_detach_check()
+
+
+def main():
+    os.makedirs(OUT, exist_ok=True)
+    views = VIEWS if VIEW_ARG == "all" else (VIEW_ARG,)
+
+    all_ok = True
+    for view in views:
+        bundle_name = "character_32" + ("" if view == "front" else "_" + view)
+        print()
+        print("=" * 76)
+        print(f"  {VIEW_LABELS[view]}   rig = tests/fixtures/{bundle_name}")
+        print("=" * 76)
+        if not review_view(view):
+            all_ok = False
+
     print()
     print(f"Output dir / 输出目录: {OUT}")
+    if not all_ok:
+        print("DETACH GATE FAILED / 脱节闸门失败")
+    return 0 if all_ok else 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
