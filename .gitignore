@@ -1,5 +1,10 @@
 # Build output / 构建产物
 build/
+*.o
+*.o.d
+
+# Generated output / 生成产物（测试夹具在 tests/fixtures/）
+output/
 
 # macOS / macOS 系统文件
 .DS_Store
