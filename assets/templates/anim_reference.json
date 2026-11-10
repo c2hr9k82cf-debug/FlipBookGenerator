@@ -1,0 +1,672 @@
+{
+  "source": "09d46502714b463788ad0eb9a23ae0f9.png",
+  "layout": {
+    "grid": "6x6",
+    "cell_size": 32,
+    "row_mapping": {
+      "row_0_idle": "idle_front",
+      "row_1_walk": "walk_front",
+      "row_2_idle": "idle_side",
+      "row_3_walk": "walk_side",
+      "row_4_idle": "idle_back",
+      "row_5_walk": "walk_up"
+    }
+  },
+  "animations": {
+    "idle_front": {
+      "frames": 2,
+      "fps": 8,
+      "body_offset_y": [
+        0,
+        1
+      ],
+      "frame_data": [
+        {
+          "body_top_y": 2,
+          "pants_count": 21,
+          "tan_count": 17,
+          "pants_x_range": [
+            12,
+            16
+          ],
+          "pants_y_range": [
+            21,
+            27
+          ],
+          "tan_x_range": [
+            16,
+            19
+          ],
+          "tan_y_range": [
+            21,
+            27
+          ],
+          "frame": 0
+        },
+        {
+          "body_top_y": 3,
+          "pants_count": 21,
+          "tan_count": 17,
+          "pants_x_range": [
+            12,
+            16
+          ],
+          "pants_y_range": [
+            21,
+            27
+          ],
+          "tan_x_range": [
+            16,
+            19
+          ],
+          "tan_y_range": [
+            21,
+            27
+          ],
+          "frame": 1
+        }
+      ]
+    },
+    "walk_front": {
+      "frames": 6,
+      "fps": 10,
+      "body_offset_y": [
+        0,
+        1,
+        0,
+        1,
+        2,
+        1
+      ],
+      "frame_data": [
+        {
+          "body_top_y": 1,
+          "pants_count": 9,
+          "tan_count": 15,
+          "pants_x_range": [
+            13,
+            16
+          ],
+          "pants_y_range": [
+            21,
+            25
+          ],
+          "tan_x_range": [
+            16,
+            19
+          ],
+          "tan_y_range": [
+            21,
+            26
+          ],
+          "frame": 0
+        },
+        {
+          "body_top_y": 2,
+          "pants_count": 19,
+          "tan_count": 17,
+          "pants_x_range": [
+            13,
+            16
+          ],
+          "pants_y_range": [
+            21,
+            27
+          ],
+          "tan_x_range": [
+            16,
+            19
+          ],
+          "tan_y_range": [
+            21,
+            27
+          ],
+          "frame": 1
+        },
+        {
+          "body_top_y": 1,
+          "pants_count": 7,
+          "tan_count": 17,
+          "pants_x_range": [
+            16,
+            18
+          ],
+          "pants_y_range": [
+            22,
+            25
+          ],
+          "tan_x_range": [
+            12,
+            16
+          ],
+          "tan_y_range": [
+            21,
+            26
+          ],
+          "frame": 2
+        },
+        {
+          "body_top_y": 2,
+          "pants_count": 6,
+          "tan_count": 21,
+          "pants_x_range": [
+            16,
+            18
+          ],
+          "pants_y_range": [
+            23,
+            25
+          ],
+          "tan_x_range": [
+            12,
+            16
+          ],
+          "tan_y_range": [
+            21,
+            27
+          ],
+          "frame": 3
+        },
+        {
+          "body_top_y": 3,
+          "pants_count": 15,
+          "tan_count": 19,
+          "pants_x_range": [
+            16,
+            19
+          ],
+          "pants_y_range": [
+            22,
+            27
+          ],
+          "tan_x_range": [
+            12,
+            16
+          ],
+          "tan_y_range": [
+            22,
+            27
+          ],
+          "frame": 4
+        },
+        {
+          "body_top_y": 2,
+          "pants_count": 15,
+          "tan_count": 17,
+          "pants_x_range": [
+            13,
+            16
+          ],
+          "pants_y_range": [
+            21,
+            26
+          ],
+          "tan_x_range": [
+            16,
+            19
+          ],
+          "tan_y_range": [
+            21,
+            27
+          ],
+          "frame": 5
+        }
+      ],
+      "tone_swap_groups": [
+        [
+          0,
+          1,
+          5
+        ],
+        [
+          2,
+          3,
+          4
+        ]
+      ],
+      "passing_frames": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    "idle_side": {
+      "frames": 2,
+      "fps": 8,
+      "body_offset_y": [
+        0,
+        1
+      ],
+      "frame_data": [
+        {
+          "body_top_y": 2,
+          "pants_count": 11,
+          "tan_count": 18,
+          "pants_x_range": [
+            16,
+            18
+          ],
+          "pants_y_range": [
+            21,
+            27
+          ],
+          "tan_x_range": [
+            13,
+            17
+          ],
+          "tan_y_range": [
+            21,
+            27
+          ],
+          "frame": 0
+        },
+        {
+          "body_top_y": 3,
+          "pants_count": 11,
+          "tan_count": 18,
+          "pants_x_range": [
+            16,
+            18
+          ],
+          "pants_y_range": [
+            21,
+            27
+          ],
+          "tan_x_range": [
+            13,
+            17
+          ],
+          "tan_y_range": [
+            21,
+            27
+          ],
+          "frame": 1
+        }
+      ]
+    },
+    "walk_side": {
+      "frames": 6,
+      "fps": 10,
+      "body_offset_y": [
+        0,
+        1,
+        0,
+        0,
+        1,
+        0
+      ],
+      "frame_data": [
+        {
+          "body_top_y": 2,
+          "pants_count": 11,
+          "tan_count": 15,
+          "pants_x_range": [
+            16,
+            19
+          ],
+          "pants_y_range": [
+            21,
+            27
+          ],
+          "tan_x_range": [
+            13,
+            17
+          ],
+          "tan_y_range": [
+            21,
+            27
+          ],
+          "frame": 0
+        },
+        {
+          "body_top_y": 3,
+          "pants_count": 9,
+          "tan_count": 16,
+          "pants_x_range": [
+            16,
+            18
+          ],
+          "pants_y_range": [
+            22,
+            27
+          ],
+          "tan_x_range": [
+            14,
+            17
+          ],
+          "tan_y_range": [
+            22,
+            27
+          ],
+          "frame": 1
+        },
+        {
+          "body_top_y": 2,
+          "pants_count": 13,
+          "tan_count": 25,
+          "pants_x_range": [
+            13,
+            18
+          ],
+          "pants_y_range": [
+            21,
+            28
+          ],
+          "tan_x_range": [
+            13,
+            18
+          ],
+          "tan_y_range": [
+            21,
+            27
+          ],
+          "frame": 2
+        },
+        {
+          "body_top_y": 2,
+          "pants_count": 17,
+          "tan_count": 22,
+          "pants_x_range": [
+            12,
+            18
+          ],
+          "pants_y_range": [
+            21,
+            28
+          ],
+          "tan_x_range": [
+            13,
+            19
+          ],
+          "tan_y_range": [
+            21,
+            27
+          ],
+          "frame": 3
+        },
+        {
+          "body_top_y": 3,
+          "pants_count": 9,
+          "tan_count": 20,
+          "pants_x_range": [
+            14,
+            18
+          ],
+          "pants_y_range": [
+            22,
+            28
+          ],
+          "tan_x_range": [
+            13,
+            18
+          ],
+          "tan_y_range": [
+            22,
+            27
+          ],
+          "frame": 4
+        },
+        {
+          "body_top_y": 2,
+          "pants_count": 16,
+          "tan_count": 20,
+          "pants_x_range": [
+            17,
+            19
+          ],
+          "pants_y_range": [
+            21,
+            27
+          ],
+          "tan_x_range": [
+            13,
+            16
+          ],
+          "tan_y_range": [
+            21,
+            27
+          ],
+          "frame": 5
+        }
+      ],
+      "tone_swap_groups": [
+        [
+          0,
+          1,
+          2,
+          4,
+          5
+        ],
+        [
+          3
+        ]
+      ],
+      "passing_frames": [
+        1,
+        2,
+        4
+      ]
+    },
+    "idle_back": {
+      "frames": 2,
+      "fps": 8,
+      "body_offset_y": [
+        0,
+        1
+      ],
+      "frame_data": [
+        {
+          "body_top_y": 2,
+          "pants_count": 19,
+          "tan_count": 15,
+          "pants_x_range": [
+            15,
+            19
+          ],
+          "pants_y_range": [
+            21,
+            27
+          ],
+          "tan_x_range": [
+            13,
+            15
+          ],
+          "tan_y_range": [
+            21,
+            27
+          ],
+          "frame": 0
+        },
+        {
+          "body_top_y": 3,
+          "pants_count": 19,
+          "tan_count": 15,
+          "pants_x_range": [
+            15,
+            19
+          ],
+          "pants_y_range": [
+            21,
+            27
+          ],
+          "tan_x_range": [
+            13,
+            15
+          ],
+          "tan_y_range": [
+            21,
+            27
+          ],
+          "frame": 1
+        }
+      ]
+    },
+    "walk_up": {
+      "frames": 6,
+      "fps": 10,
+      "body_offset_y": [
+        0,
+        1,
+        0,
+        1,
+        2,
+        1
+      ],
+      "frame_data": [
+        {
+          "body_top_y": 1,
+          "pants_count": 13,
+          "tan_count": 13,
+          "pants_x_range": [
+            15,
+            18
+          ],
+          "pants_y_range": [
+            21,
+            25
+          ],
+          "tan_x_range": [
+            13,
+            15
+          ],
+          "tan_y_range": [
+            21,
+            26
+          ],
+          "frame": 0
+        },
+        {
+          "body_top_y": 2,
+          "pants_count": 19,
+          "tan_count": 15,
+          "pants_x_range": [
+            15,
+            18
+          ],
+          "pants_y_range": [
+            21,
+            27
+          ],
+          "tan_x_range": [
+            13,
+            15
+          ],
+          "tan_y_range": [
+            21,
+            27
+          ],
+          "frame": 1
+        },
+        {
+          "body_top_y": 1,
+          "pants_count": 15,
+          "tan_count": 17,
+          "pants_x_range": [
+            12,
+            15
+          ],
+          "pants_y_range": [
+            21,
+            26
+          ],
+          "tan_x_range": [
+            15,
+            19
+          ],
+          "tan_y_range": [
+            21,
+            26
+          ],
+          "frame": 2
+        },
+        {
+          "body_top_y": 2,
+          "pants_count": 17,
+          "tan_count": 19,
+          "pants_x_range": [
+            12,
+            15
+          ],
+          "pants_y_range": [
+            21,
+            27
+          ],
+          "tan_x_range": [
+            15,
+            19
+          ],
+          "tan_y_range": [
+            21,
+            26
+          ],
+          "frame": 3
+        },
+        {
+          "body_top_y": 3,
+          "pants_count": 17,
+          "tan_count": 13,
+          "pants_x_range": [
+            15,
+            18
+          ],
+          "pants_y_range": [
+            22,
+            27
+          ],
+          "tan_x_range": [
+            13,
+            15
+          ],
+          "tan_y_range": [
+            22,
+            27
+          ],
+          "frame": 4
+        },
+        {
+          "body_top_y": 2,
+          "pants_count": 17,
+          "tan_count": 15,
+          "pants_x_range": [
+            15,
+            18
+          ],
+          "pants_y_range": [
+            21,
+            26
+          ],
+          "tan_x_range": [
+            13,
+            15
+          ],
+          "tan_y_range": [
+            21,
+            27
+          ],
+          "frame": 5
+        }
+      ],
+      "tone_swap_groups": [
+        [
+          0,
+          1,
+          4,
+          5
+        ],
+        [
+          2,
+          3
+        ]
+      ],
+      "passing_frames": [
+        0,
+        1,
+        4,
+        5
+      ]
+    }
+  }
+}

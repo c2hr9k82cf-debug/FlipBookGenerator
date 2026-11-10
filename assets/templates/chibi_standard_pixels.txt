@@ -1,0 +1,82 @@
+# chibi_standard_pixels.txt — pixel-exact character template
+# 逐像素角色模板
+#
+# Extracted from reference sheet 09d46502714b463788ad0eb9a23ae0f9.png, cell (0,0)
+# (front idle frame 0). 30 rows x 14 cols, placed at x9..x22, y2..y31 in 32x32.
+# 取自参考图 (0,0) 格（正面待机第 0 帧）。30 行 x 14 列，放在 32x32 的 x9..x22, y2..y31。
+#
+# Palette / 调色板:
+#   @ = outline(46,34,47)       h = hair_mid(247,150,23)    H = hair_dark(251,107,29)
+#   y = hair_highlight(249,194,43)  s = skin(253,203,176)   b = blush(252,167,144)
+#   t = tan(230,144,78)         m = mint(199,220,208)       w = white(255,255,255)
+#   r = red(232,59,59)          p = pants(205,104,61)       g = grey(155,171,178)
+#   G = grey_dark(127,112,138)  T = teal(22,90,76)          . = transparent
+#
+# Part ownership / 部件归属:
+#   head: y2-y12 (11 rows), whole width
+#   body: y13-y20 (8 rows), centre cols (index 3..10 in 14-wide)
+#   arm_left: y13-y20, cols 0..2 (x9..x11)
+#   arm_right: y13-y20, cols 11..13 (x20..x22)
+#   leg_left: y21-y31, cols 0..6 (x9..x15)
+#   leg_right: y21-y31, cols 7..13 (x16..x22)
+
+# y2   crown of hair / 头发顶
+....@@@@@@....
+# y3   highlight streak / 高光条
+...@yhyyhy@...
+# y4   mid fills / 中调填充
+..@yhhhhhhy@..
+# y5   highlight continues / 高光延续
+.@HhhHhhhhhH@.
+# y6   dark hair, blush hint / 暗发，腮红暗示
+.HhhHbHHHHhh@.
+# y7   fringe in mid tone, eyebrows / 刘海中调，眉毛
+HHhH@@bb@@HhH@
+# y8   eyes (T=iris, s=eye white) / 眼睛
+@HH@mTssTm@hhH
+# y9   eyes 2nd row / 眼睛第二行
+@HHbw@ss@wbHhH
+# y10  cheeks / 腮红
+@HHrssssssrHH.
+# y11  mouth / 嘴
+@HHHrssssrHH..
+# y12  chin / 下巴
+@HHHrrbbrrHH..
+# y13  neck + collar / 颈与领
+.H@@mgssgm@@..
+# y14  chest / 胸
+.@ssmmggmmss@.
+# y15  chest / 胸
+.@sbmwmmwmbs@.
+# y16  chest / 胸
+@sbmwwwwwwmbs@
+# y17  chest / 胸
+@sbmwwwwwwmbs@
+# y18  belt / 腰带
+@sbmmmmmmmmbs@
+# y19  below belt / 腰带下
+@ssbmmmmmmbss@
+# y20  waistline / 腰线
+@sss@@@@@@sss@
+# y21  hips / 胯
+.@b@pppptt@b@.
+# y22  thighs / 大腿
+.@spppppttts@.
+# y23  legs / 腿
+..@pppptttt@..
+# y24  legs, seam / 腿，缝
+...@pp@@tt@...
+# y25  legs / 腿
+...@pp@@tt@...
+# y26  boot tops / 靴筒
+..@pp@.@tt@...
+# y27  boots / 靴
+..@pp@.@tt@...
+# y28  boot soles / 靴底
+..@@@@.@@@@...
+# y29  boot detail / 靴细节
+..@GG@.@gg@...
+# y30  boot flare / 靴外扩
+.@GGG@.@ggg@..
+# y31  soles / 靴底
+.@@@@...@@@...

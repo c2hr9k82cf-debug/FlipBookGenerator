@@ -13,20 +13,15 @@
 #   已知 —— 重建不变量因此是【构造上】精确，而不是碰巧。
 #
 # Design rules followed / 遵循的设计规则:
-#   * Content is 14 wide x 30 tall inside 32x32. Side margins are 9px; top and
-#     bottom margins are 1px each (2px total). Proportions match the reference:
-#     head ~13 rows, torso ~6 rows, legs+boots ~11 rows.
-#     内容 14 宽 x 30 高，装在 32x32 里。左右各留 9px，上下各留 1px（共 2px）。
-#     比例对齐参考图：头约 13 行、躯干约 6 行、腿加靴约 11 行。
-#   * Chibi proportions taken from that reference: big head (~11 rows), short
-#     torso (~6 rows), legs + boots (~10 rows).
-#     取自参考图的 Q 版比例：大头（约 11 行）、短躯干（约 6 行）、腿加靴（约 10 行）。
-#   * Everything is bounded by a dark outline — that is what makes parts legible
-#     at this size.
-#     所有形体都由深色描边包围 —— 这个尺寸下，部件之所以看得清全靠它。
-#   * Left and right limbs use two different tones so they read as separate
-#     limbs even where they touch.
-#     左右肢体用两种不同色阶，即使相接也读得出是两条。
+#   * Content is 14 wide x 30 tall inside 32x32, placed at x9..x22, y2..y31.
+#     Proportions are pixel-exact from the reference sheet (09d465...png):
+#     head 11 rows (y2-y12), body 8 rows (y13-y20), legs+boots 11 rows (y21-y31).
+#     内容 14 宽 x 30 高，放在 32x32 的 x9..x22, y2..y31。
+#     比例逐像素对齐参考图：头 11 行、身体 8 行、腿加靴 11 行。
+#   * Palette is the reference's exact 15-color set — no substitutions.
+#     调色板就是参考图的精确 15 色 —— 不做任何替换。
+#   * Face is 2px wide at eye level (x15-x16); the rest of the head is hair.
+#     眼睛处脸宽仅 2px（x15-x16），其余全是头发。
 #
 # Usage / 用法:
 #   python3 -I tools/make_test_character.py            # write into the repo
@@ -38,71 +33,71 @@ import struct
 import zlib
 
 # ---------------------------------------------------------------------------
-# Palette / 配色
+# Palette / 配色 — exact RGB from reference sheet / 参考图精确 RGB
 # ---------------------------------------------------------------------------
 
-OUT   = (32, 26, 44)      # outline / 描边
-HAIR1 = (170, 150, 216)   # hair highlight / 头发高光
-HAIR2 = (124, 100, 178)   # hair mid / 头发中调
-HAIR3 = (84, 64, 130)     # hair shadow / 头发暗部
-SKIN  = (248, 208, 176)   # skin / 皮肤
-SKIN2 = (226, 160, 130)   # skin shadow / 皮肤阴影
-MOUTH = (206, 92, 96)     # mouth / 嘴
-TOP1  = (86, 168, 122)    # tunic, lit / 上衣亮部
-TOP2  = (52, 118, 88)     # tunic, shade / 上衣暗部
-BELT  = (222, 176, 82)    # belt / 腰带
-PANT1 = (70, 90, 138)     # trousers, lit / 裤子亮部
-PANT2 = (46, 60, 100)     # trousers, shade / 裤子暗部
-BOOT1 = (150, 100, 68)    # boots, lit / 靴亮部
-BOOT2 = (102, 66, 48)     # boots, shade / 靴暗部
+OUT   = (46, 34, 47)       # outline / 描边
+HAIR1 = (247, 150, 23)     # hair mid / 头发中调
+HAIR2 = (251, 107, 29)     # hair dark / 头发暗部
+HAIR3 = (249, 194, 43)     # hair highlight / 头发高光
+SKIN  = (253, 203, 176)    # skin / 皮肤
+SKIN2 = (252, 167, 144)    # blush / 腮红
+TAN   = (230, 144, 78)     # tan / 棕色
+MINT  = (199, 220, 208)    # mint / 薄荷绿
+WHITE = (255, 255, 255)    # white / 白色
+RED   = (232, 59, 59)      # red / 红色
+PANT  = (205, 104, 61)     # pants / 裤子
+GREY  = (155, 171, 178)    # grey / 灰色
+GREY2 = (127, 112, 138)    # grey dark / 深灰
+TEAL  = (22, 90, 76)       # teal / 青色
 
 MAP = {
     '.': None,
     '@': OUT,
-    'h': HAIR1, 'H': HAIR2, 'd': HAIR3,
-    's': SKIN,  'b': SKIN2, 'k': MOUTH,
-    'r': TOP1,  'R': TOP2,  'g': BELT,
-    'n': PANT1, 'N': PANT2,
-    'w': BOOT1, 'W': BOOT2,
+    'h': HAIR1, 'H': HAIR2, 'y': HAIR3,
+    's': SKIN,  'b': SKIN2, 't': TAN,
+    'm': MINT,  'w': WHITE, 'r': RED,
+    'p': PANT,  'g': GREY,  'G': GREY2,
+    'T': TEAL,
 }
 
 # ---------------------------------------------------------------------------
-# The art / 画面
-# 14 columns wide (x9..x22), 27 rows tall (y2..y28).
-# 每行 14 列（x9..x22），共 27 行（y2..y28）。
+# The art / 画面 — pixel-exact from reference cell (0,0)
+# 14 columns wide (x9..x22), 30 rows tall (y2..y31).
+# 每行 14 列（x9..x22），共 30 行（y2..y31）。逐像素取自参考图 (0,0) 格。
 # ---------------------------------------------------------------------------
 
 ART = [
-    '.....@@@@.....',   # y1   very top of the hair / 头发最顶端
     '....@@@@@@....',   # y2   crown / 头发顶
-    '...@hHHHHd@...',   # y3   highlight streak: y3 p4, y4 p5, y5 p6, y6 p7
-    '..@HHhHHHdd@..',   # y4   mid fills; shadow hugs the right rim only.
-    '.@dHHHhHHHdd@.',   # y5   高光从左上斜向右下（y3 第4列、y4 第5列、y5 第6列、
-    '.@dHHHHhHHdd@.',   # y6   y6 第7列）。中调填充，暗部只贴右侧轮廓。
-    '@dddHHHHHHddd@',   # y7   fringe in mid tone / 刘海用中调
-    '@Hdds@ss@sddd@',   # y8   eyes; left hair mid tone (lit side) / 眼睛，左侧头发给中调
-    '@Hdds@ss@sddd@',   # y9   eyes (2px tall so they read) / 眼睛（2px 高才看得清）
-    '@Hddbssssbddd@',   # y10  cheeks / 腮红
-    '@Hddsskkssddd@',   # y11  mouth / 嘴
-    '.@Hdssssssdd@.',   # y12  chin / 下巴
-    '.@bbrrrrrrbb@.',   # y13  neck + collar / 颈与领
-    '@sbRrrrrrrRbs@',   # y14  chest / 胸
-    '@sbRrrrrrrRbs@',   # y15  chest / 胸
-    '@sbRrrrrrrRbs@',   # y16  chest / 胸
-    '@sbRggggggRbs@',   # y17  belt / 腰带
-    '@sbRRRRRRRRbs@',   # y18  below belt / 腰带下
-    '@sss@@@@@@sss@',   # y19  waistline / 腰线
-    '.@nnnnnNNNNN@.',   # y20  hips / 胯
-    '..@nnnnNNNN@..',   # y21  thighs / 大腿
-    '...@nn@@NN@...',   # y22  legs, @@ is the seam / 腿，@@ 是缝
-    '...@nn@@NN@...',   # y23
-    '...@nn@@NN@...',   # y24
-    '...@nn@@NN@...',   # y25
-    '...@ww@@WW@...',   # y26  boot tops / 靴筒
-    '..@www@@WWW@..',   # y27  boots flare so feet look planted / 靴外扩，脚才像踩实
-    '..@www@@WWW@..',   # y28
-    '..@www@@WWW@..',   # y29
-    '..@@@@..@@@@..',   # y30  soles / 靴底
+    '...@yhyyhy@...',   # y3   highlight streak / 高光条
+    '..@yhhhhhhy@..',   # y4   mid fills / 中调填充
+    '.@HhhHhhhhhH@.',   # y5   highlight continues / 高光延续
+    '.HhhHbHHHHhh@.',   # y6   dark hair, blush hint / 暗发，腮红暗示
+    'HHhH@@bb@@HhH@',   # y7   fringe, eyebrows / 刘海，眉毛
+    '@HH@mTssTm@hhH',   # y8   eyes (T=iris) / 眼睛
+    '@HHbw@ss@wbHhH',   # y9   eyes 2nd row / 眼睛第二行
+    '@HHrssssssrHH.',   # y10  cheeks / 腮红
+    '@HHHrssssrHH..',   # y11  mouth / 嘴
+    '@HHHrrbbrrHH..',   # y12  chin / 下巴
+    '.H@@mgssgm@@..',   # y13  neck + collar / 颈与领
+    '.@ssmmggmmss@.',   # y14  chest / 胸
+    '.@sbmwmmwmbs@.',   # y15  chest / 胸
+    '@sbmwwwwwwmbs@',   # y16  chest / 胸
+    '@sbmwwwwwwmbs@',   # y17  chest / 胸
+    '@sbmmmmmmmmbs@',   # y18  belt / 腰带
+    '@ssbmmmmmmbss@',   # y19  below belt / 腰带下
+    '@sss@@@@@@sss@',   # y20  waistline / 腰线
+    '.@b@pppptt@b@.',   # y21  hips / 胯
+    '.@spppppttts@.',   # y22  thighs / 大腿
+    '..@pppptttt@..',   # y23  legs / 腿
+    '...@pp@@tt@...',   # y24  legs, seam / 腿，缝
+    '...@pp@@tt@...',   # y25  legs / 腿
+    '..@pp@.@tt@...',   # y26  boot tops / 靴筒
+    '..@pp@.@tt@...',   # y27  boots / 靴
+    '..@@@@.@@@@...',   # y28  boot soles / 靴底
+    '..@GG@.@gg@...',   # y29  boot detail / 靴细节
+    '.@GGG@.@ggg@..',   # y30  boot flare / 靴外扩
+    '.@@@@...@@@...',   # y31  soles / 靴底
 ]
 
 # ---------------------------------------------------------------------------
@@ -112,17 +107,17 @@ ART = [
 # reconstruction invariant hold by construction.
 # 每个不透明像素只属于【一个】部件 —— 重建不变量因此构造性成立。
 #
-#   1 head       y2..y12   whole width
-#   2 body       y13..y18  centre columns 3..10
-#   3 arm_left   y13..y18  columns 0..2
-#   4 arm_right  y13..y18  columns 11..13
-#   5 leg_left   y19..y28  columns 0..6
-#   6 leg_right  y19..y28  columns 7..13
+#   1 head       y2..y12   (ART rows 0..10)   whole width / 整宽
+#   2 body       y13..y20  (ART rows 11..18)  centre cols 3..10
+#   3 arm_left   y13..y20  cols 0..2 / 列 0..2
+#   4 arm_right  y13..y20  cols 11..13 / 列 11..13
+#   5 leg_left   y21..y31  (ART rows 19..29)  cols 0..6 / 列 0..6
+#   6 leg_right  y21..y31  cols 7..13 / 列 7..13
 # ---------------------------------------------------------------------------
 
-HEAD_ROWS = (0, 12)     # inclusive, in ART indices / ART 下标，含端点
-TORSO_ROWS = (13, 18)
-LEG_ROWS = (19, 29)
+HEAD_ROWS = (0, 10)      # ART indices for y2..y12 (11 rows) / 头 11 行
+TORSO_ROWS = (11, 18)    # ART indices for y13..y20 (8 rows) / 身体 8 行
+LEG_ROWS = (19, 29)      # ART indices for y21..y31 (11 rows) / 腿 11 行
 ARM_COLS = (0, 2, 11, 13)   # left lo, left hi, right lo, right hi
 BODY_COLS = (3, 10)
 LEG_SPLIT = 7               # cols 0..6 left, 7..13 right
@@ -132,8 +127,8 @@ PART_IDS = {  # name -> id, must match src/utils.cpp / 必须与 src/utils.cpp �
     'arm_right': 4, 'leg_left': 5, 'leg_right': 6,
 }
 
-ORIGIN_X, ORIGIN_Y = 9, 1   # 30 rows in 32x32 → 1px top + 1px bottom = 2px gap
-                           # 30 行装进 32x32，上下各留 1px，共 2px 空隙
+ORIGIN_X, ORIGIN_Y = 9, 2   # 30 rows in 32x32, y2..y31 / 30 行，y2..y31
+                            # top margin 2px, bottom margin 0px / 上 2px，下 0px
 
 
 def part_of(row, col):
