@@ -67,9 +67,12 @@ struct Affine2D {
 };
 
 // Rasterise one part's sprite into the frame, honouring the rules above.
-// 按上述规则把一个部件的精灵图光栅化进画面。
-void blitPart(cv::Mat& frame, const cv::Mat& sprite, const cv::Rect& bbox,
-              const Affine2D& m) {
+// `owner` records WHICH part painted each pixel (0 = nobody); the seam repair
+// needs it to tell one part's own drawing from a gap between two parts.
+// 按上述规则把一个部件的精灵图光栅化进画面。`owner` 记下每个像素是【谁】画的
+// （0 = 没人画）；补缝要用它来区分"一个部件自己的画法"和"两个部件之间的缝"。
+void blitPart(cv::Mat& frame, cv::Mat& owner, int partId, const cv::Mat& sprite,
+              const cv::Rect& bbox, const Affine2D& m) {
     // Conservative dest bounds: the source bbox corners mapped forward.
     // 保守的目标范围：源包围盒四角经正向变换后的位置。
     const float xs[4] = {
@@ -108,6 +111,7 @@ void blitPart(cv::Mat& frame, const cv::Mat& sprite, const cv::Rect& bbox,
 
     for (int y = y0; y <= y1; ++y) {
         cv::Vec4b* dstRow = frame.ptr<cv::Vec4b>(y);
+        uchar* ownerRow = owner.ptr<uchar>(y);
         for (int x = x0; x <= x1; ++x) {
             float px, py;
             m.inverse((float)x + 0.5f, (float)y + 0.5f, px, py);
@@ -148,6 +152,7 @@ void blitPart(cv::Mat& frame, const cv::Mat& sprite, const cv::Rect& bbox,
             // Overwrite, no blending. z-order decides.
             // 直接覆盖，不混合。由 zOrder 决定。
             dstRow[x] = s;
+            ownerRow[x] = (uchar)partId;
         }
     }
 }
@@ -180,7 +185,7 @@ void blitPart(cv::Mat& frame, const cv::Mat& sprite, const cv::Rect& bbox,
 //
 // 单位位姿下没有任何像素被包围（部件严丝合缝），因此这里是恒等操作，
 // 重建不变量不受影响。
-void fillInteriorHoles(cv::Mat& frame) {
+void fillInteriorHoles(cv::Mat& frame, cv::Mat& owner) {
     const int W = frame.cols, H = frame.rows;
     if (W < 3 || H < 3) return;   // nothing can be enclosed / 不可能有封闭区
 
@@ -207,14 +212,18 @@ void fillInteriorHoles(cv::Mat& frame) {
     }
 
     // First opaque neighbour in a fixed order, so the fill is deterministic.
-    // 按固定顺序找第一个不透明邻居，保证填充结果确定。
-    auto opaqueNeighbour = [&](int x, int y, cv::Vec4b& out) {
+    // Also hands back that neighbour's owner, so a repaired pixel inherits the
+    // part it was repaired FROM and the tear pass can still tell parts apart.
+    // 按固定顺序找第一个不透明邻居，保证填充结果确定。同时带回该邻居的归属，
+    // 让补出的像素继承【它所修复的那个部件】，撕裂判定才能继续分辨部件。
+    auto opaqueNeighbour = [&](int x, int y, cv::Vec4b& out, uchar& outOwner) {
         for (int k = 0; k < 4; ++k) {
             const int nx = x + dx[k], ny = y + dy[k];
             if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
             const cv::Vec4b s = frame.at<cv::Vec4b>(ny, nx);
             if (s[3] == 0) continue;
             out = s;
+            outOwner = owner.at<uchar>(ny, nx);
             return true;
         }
         return false;
@@ -231,7 +240,8 @@ void fillInteriorHoles(cv::Mat& frame) {
             if (open.at<uchar>(y, x)) continue;
             isSeam.at<uchar>(y, x) = 1;
             cv::Vec4b c;
-            if (opaqueNeighbour(x, y, c)) queue.push_back(cv::Point(x, y));
+            uchar o = 0;
+            if (opaqueNeighbour(x, y, c, o)) queue.push_back(cv::Point(x, y));
         }
     }
 
@@ -243,8 +253,10 @@ void fillInteriorHoles(cv::Mat& frame) {
         const int x = queue[head].x, y = queue[head].y;
         if (!isSeam.at<uchar>(y, x)) continue;    // already filled / 已填过
         cv::Vec4b c;
-        if (!opaqueNeighbour(x, y, c)) continue;  // still interior, retry later / 仍在内部，稍后再来
+        uchar o = 0;
+        if (!opaqueNeighbour(x, y, c, o)) continue;  // still interior, retry later / 仍在内部，稍后再来
         frame.at<cv::Vec4b>(y, x) = c;
+        owner.at<uchar>(y, x) = o;
         isSeam.at<uchar>(y, x) = 0;
         for (int k = 0; k < 4; ++k) {
             const int nx = x + dx[k], ny = y + dy[k];
@@ -254,10 +266,131 @@ void fillInteriorHoles(cv::Mat& frame) {
     }
 }
 
+// Repair TEARS — the second class of seam, which the flood above cannot see.
+//
+// A tear is a run of transparent pixels in one column that is boxed in
+// VERTICALLY: opaque directly above the run and opaque directly below it.
+// That is the signature of two parts that moved differently and pulled apart
+// at their joint. It is not enclosed — the run usually reaches the open
+// background to the side — so the flood above never touches it, and the
+// detach gate (1 blob / 0 holes) cannot see it either.
+//
+// The discriminator needs BOTH tests / 判据需要【两个条件同时成立】:
+//
+//   (1) OWNERSHIP — the two opaque ends belong to different parts. One part
+//       cannot tear itself: it is rasterised by a continuous transform, so the
+//       pixels it owns stay one piece. If both ends are the same part, the gap
+//       is what the art draws — the front's leg outline steps in at (11,24)
+//       and the step moves with the leg under the idle bob without ever being
+//       damage.
+//   （1）【归属】—— 两端分属不同部件。一个部件撕不开自己：它由连续变换光栅化，
+//        拥有的像素始终连成一片。两头同属一个部件时，缺口就是画出来的 ——
+//        正面的腿轮廓在 (11,24) 收进一格，整体起伏时它跟着腿走，从来不是损伤。
+//
+//   (2) THE SOURCE had those pixels opaque — the neutral pose carried a pixel
+//       there and this frame dropped it.
+//   （2）【原图】该处不透明 —— 静止姿势本来有这个像素，这一帧把它弄丢了。
+//
+// Each test alone is WRONG, and both counterexamples are in this project
+// already / 单用任何一个都错，两个反例本项目里都有:
+//
+//   (1) alone redraws the character. The back view steps its hair outline in
+//       at (10,13) — head above, arm_left below, i.e. CROSS-PART, exactly at
+//       the shoulder where the two parts do abut. It is a drawn pixel, not a
+//       seam, and it must survive or the reconstruction invariant dies.
+//   （1）单用会重画角色。背视在 (10,13) 把头发描边收进一格 —— 上面是 head、
+//        下面是 arm_left，【跨部件】，而且就在两部件相接的肩部。那是画出来的
+//        像素，不是缝；它必须活下来，否则重建不变量就没了。
+//
+//   (2) alone is anchored to coordinates, so it compares a gap against the
+//       pixel the neutral pose had SOMEWHERE ELSE once the character moves.
+//       Measured on the idle bob — every part shifted by the same 2px, which
+//       cannot tear anything — it still reported damage at (11,22) and filled
+//       a hole the artist drew.
+//   （2）单用锚死在坐标上，角色一动，它就拿空隙去比静止姿势在【别处】的像素。
+//        实测整体起伏 —— 所有部件位移同为 2px，根本撕不开任何东西 —— 它照样在
+//        (11,22) 报出损伤，并把画师画的缺口填掉。
+//
+// Together they are exact on every case measured, and (2) makes this a PROVABLE
+// no-op at an identity pose: there the frame IS the source, so every transparent
+// run fails (2). That is what keeps the reconstruction invariant intact.
+// 两者合用在所有实测情形上都正确；且 (2) 让本函数在单位位姿下【可证明】是恒等
+// 操作：那时画面【就是】原图，任何透明段都过不了 (2)。重建不变量因此不受影响。
+//
+// Why vertical only / 为何只补竖向:
+//   The safe primitives pin the JOINTS — neck, shoulder, hip — which stack
+//   parts vertically, so a vertical squeeze across parts is always damage. A
+//   horizontal gap is how a swinging limb reads; closing those would glue an
+//   arm back onto the torso and erase the motion.
+//   安全动作钉住的是【关节】——颈、肩、胯 —— 它们把部件竖着摞起来，所以跨部件的
+//   竖向受压必然是损伤。横向的缝正是摆动的肢体该有的样子；补上它等于把手臂粘回
+//   躯干，动作就没了。
+//
+// Colour: each pixel of the run takes the colour of the end it is nearer — the
+// top of the run continues the part above, the bottom continues the part below.
+// A 1px run therefore takes the upper part's colour. Neighbours' own colours
+// only, never a blend and never an invented one (rule 4).
+// 颜色：段上每一格取【离它更近的那一端】的颜色 —— 段的上半接着上面那个部件，
+// 下半接着下面那个。一格的段于是取上面部件的颜色。只用邻居自己的颜色，
+// 不混合、不发明颜色（规则 4）。
+//
+// Under an identity pose every part sits exactly on its neighbours, so no
+// cross-part run exists and this is a no-op. That is what keeps the
+// reconstruction invariant intact — checked by --recon-test on all three rigs.
+// 单位位姿下每个部件都严丝合缝地贴着邻居，不存在跨部件的空段，于是这里是恒等
+// 操作。重建不变量因此不受影响 —— 三套 rig 的 --recon-test 都验过。
+void fillJointPinches(cv::Mat& frame, const cv::Mat& owner, const cv::Mat& source) {
+    const int W = frame.cols, H = frame.rows;
+    const bool haveSource = !source.empty()
+        && source.rows == H && source.cols == W;
+
+    for (int x = 0; x < W; ++x) {
+        int y = 0;
+        while (y < H) {
+            if (frame.at<cv::Vec4b>(y, x)[3] != 0) { ++y; continue; }
+            const int y0 = y;
+            while (y < H && frame.at<cv::Vec4b>(y, x)[3] == 0) ++y;
+            const int y1 = y - 1;
+
+            // Boxed in vertically: opaque above the run and opaque below it.
+            // 竖向被夹住：段的正上方与正下方都不透明。
+            if (y0 == 0 || y1 == H - 1) continue;
+            const cv::Vec4b above = frame.at<cv::Vec4b>(y0 - 1, x);
+            const cv::Vec4b below = frame.at<cv::Vec4b>(y1 + 1, x);
+            if (above[3] == 0 || below[3] == 0) continue;
+
+            // Test 1 — cross-part. Same owner on both ends => that one part
+            // drew the gap. Keep it.
+            // 条件 1 —— 跨部件。两头同一归属 => 缺口是那一个部件画的。保留。
+            const uchar oa = owner.at<uchar>(y0 - 1, x);
+            const uchar ob = owner.at<uchar>(y1 + 1, x);
+            if (oa == ob) continue;
+
+            // Test 2 — the neutral pose carried pixels here. Without a source
+            // there is no way to tell art from artifact, so repair nothing.
+            // 条件 2 —— 静止姿势此处有像素。没有原图就分不清画法与损伤，宁可不补。
+            if (!haveSource) continue;
+            bool lost = true;
+            for (int yy = y0; yy <= y1; ++yy) {
+                if (source.at<cv::Vec4b>(yy, x)[3] == 0) { lost = false; break; }
+            }
+            if (!lost) continue;
+
+            for (int yy = y0; yy <= y1; ++yy) {
+                frame.at<cv::Vec4b>(yy, x) =
+                    ((yy - y0) <= (y1 - yy)) ? above : below;
+            }
+        }
+    }
+}
+
 }  // namespace
 
 cv::Mat composeFrame(const Rig& rig, const Pose& pose) {
     cv::Mat frame = cv::Mat::zeros(rig.size.height, rig.size.width, CV_8UC4);
+    // Who painted each pixel (0 = nobody). The seam repairs need it.
+    // 每个像素是谁画的（0 = 没人）。补缝需要它。
+    cv::Mat owner = cv::Mat::zeros(rig.size.height, rig.size.width, CV_8U);
 
     for (int zi = 0; zi < PART_COUNT; ++zi) {
         const int i = rig.zOrder[zi] - 1;          // zOrder stores part ids
@@ -266,9 +399,10 @@ cv::Mat composeFrame(const Rig& rig, const Pose& pose) {
 
         const Affine2D m = Affine2D::from(pose.parts[i], rig.pivots[i],
                                           pose.rootX, pose.rootY);
-        blitPart(frame, rig.parts[i], rig.bbox[i], m);
+        blitPart(frame, owner, i + 1, rig.parts[i], rig.bbox[i], m);
     }
-    fillInteriorHoles(frame);   // close the joint seams / 补上关节缝
+    fillInteriorHoles(frame, owner);                  // enclosed seams / 封闭缝
+    fillJointPinches(frame, owner, rig.source);       // tears / 撕裂
     return frame;
 }
 
