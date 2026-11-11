@@ -82,7 +82,12 @@ void PathDialog::draw() {
         ImGui::TextWrapped("%s", message_.c_str());
         ImGui::PopStyleColor();
         if (path_[0]) {
-            if (ImGui::Button("复制路径")) copyToClipboard(path_);
+            // ##msg: the inputMode_ block above may draw its own "复制路径" in
+            // the same frame (after a successful save the popup stays open and
+            // shows this message) — same label would be an ID collision.
+            // ##msg：上面 inputMode_ 分支可能同帧画出它自己的"复制路径"（保存
+            // 成功后弹窗留屏显示本消息）—— 同 label 会撞 ID。
+            if (ImGui::Button("复制路径##msg")) copyToClipboard(path_);
             ImGui::SameLine();
         }
     }

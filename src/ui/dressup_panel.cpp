@@ -122,7 +122,15 @@ void drawDressUp(AppState& st, PreviewTextures& tex) {
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
                                       ImVec4(0.34f, 0.62f, 0.98f, 1.f));
             }
-            ImGui::PushID(items[i]->name.c_str());
+            // The ID must include the slot: two items in different slots may
+            // share a name legally (hair/untitled vs top/untitled), and
+            // PushID(name) alone then collides — Dear ImGui pops "2 visible
+            // items with conflicting ID!". Fixed in v0.11.4.
+            // ID 必须带槽：不同槽允许同名（hair/untitled 与 top/untitled 是两件
+            // 合法物品），只 PushID(名字) 会撞 ID —— Dear ImGui 弹"2 visible
+            // items with conflicting ID!"。v0.11.4 修复。
+            const std::string idKey = slot + "/" + items[i]->name;
+            ImGui::PushID(idKey.c_str());
             unsigned& tex = thumbs[items[i]->dir];
             if (!tex && !items[i]->views[0].empty())
                 tex = matToTexture(items[i]->views[0]);
