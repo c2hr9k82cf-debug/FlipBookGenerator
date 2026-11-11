@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(FlipBookGenerator VERSION 0.9.0 LANGUAGES CXX)
+project(FlipBookGenerator VERSION 0.9.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -45,11 +45,14 @@ add_library(flipbook_core STATIC
     src/core/render.cpp
     src/core/export.cpp
     src/core/parts.cpp
+    src/core/parts_library.cpp
     src/core/motion.cpp
     src/core/image_io.cpp
     src/core/palette.cpp
     src/core/sheet.cpp
     src/core/align.cpp
+    src/core/json_min.cpp
+    src/core/template_spec.cpp
 )
 target_link_libraries(flipbook_core ${OPENCV_MINIMAL_LIBS})
 
@@ -181,6 +184,33 @@ foreach(align_case apply auto diff)
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
 endforeach()
+
+# Template / parts / library gates (v0.9.1). The template JSONs are the data
+# source of truth; parts semantics must match the committed bundles exactly
+# (both characters x three views); the library loader must refuse every known
+# bad shape with a reason.
+# 模板 / 部件 / 库闸门（v0.9.1）。模板 JSON 是数据真源；部件语义必须与已提交
+# 部件包逐字节一致（两角色 x 三视图）；库加载器必须拒绝全部已知坏形态并给出原因。
+add_test(
+    NAME template_load
+    COMMAND flipbook --template-load-gate
+            --templates ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates
+            --assets ${CMAKE_CURRENT_SOURCE_DIR}/assets
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+add_test(
+    NAME parts_semantics
+    COMMAND flipbook --parts-semantics-gate
+            --templates ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates
+            --assets ${CMAKE_CURRENT_SOURCE_DIR}/assets
+            --fixtures ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+add_test(
+    NAME parts_library
+    COMMAND flipbook --parts-library-gate
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
 
 # ---------------------------------------------------------------------------
 # GUI (macOS desktop app) / GUI（macOS 桌面应用）

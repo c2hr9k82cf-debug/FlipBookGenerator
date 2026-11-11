@@ -7,7 +7,10 @@
 
 #include "parts.h"
 
+#include "core/core.h"
+
 #include <algorithm>
+#include <map>
 #include <opencv2/imgproc.hpp>
 
 namespace fb {
@@ -17,40 +20,23 @@ namespace fb {
 // ---------------------------------------------------------------------------
 
 void applyPaletteRoles(cv::Mat& sprite, const std::vector<PartLayer::RoleColor>& roles) {
-    // For each pixel, if its color matches a role's original value, replace it
-    // with the override. Simple nearest-color match — the palette is small (15).
-    // 对每个像素，若颜色匹配角色的原始值，替换为覆盖值。
-    // 最近色匹配 —— 调色板很小（15 色）。
+    // EXACT src→dst colour replacement on opaque pixels, via the same
+    // PaletteMap/applyPaletteMap path the chip reskin uses. No fuzzy matching:
+    // a pixel whose colour is merely NEAR srcBgr stays untouched (the old
+    // distance<100 rule recoloured near-misses — a real bug for hand-painted
+    // sprites with anti-aliased-looking edges).
+    // 对不透明像素做精确 src→dst 换色，走芯片换皮同款 PaletteMap/applyPaletteMap。
+    // 无模糊匹配：颜色只是"接近"srcBgr 的像素保持原样（旧的 距离<100 会误改
+    // 近似色 —— 手绘精灵带渐变边缘时就是实打实的 bug）。
     if (roles.empty() || sprite.empty()) return;
 
-    for (int y = 0; y < sprite.rows; ++y) {
-        for (int x = 0; x < sprite.cols; ++x) {
-            cv::Vec4b& px = sprite.at<cv::Vec4b>(y, x);
-            if (px[3] == 0) continue;  // transparent / 透明
-
-            // Find the closest role by BGR distance.
-            // 找 BGR 距离最近的角色。
-            int bestDist = INT_MAX;
-            const cv::Vec3b* bestOverride = nullptr;
-            for (const auto& rc : roles) {
-                const int db = px[0] - rc.bgr[0];
-                const int dg = px[1] - rc.bgr[1];
-                const int dr = px[2] - rc.bgr[2];
-                const int dist = db * db + dg * dg + dr * dr;
-                if (dist < bestDist) {
-                    bestDist = dist;
-                    bestOverride = &rc.bgr;
-                }
-            }
-            // Only remap if the color is close enough (exact palette match).
-            // 只在颜色足够接近时重映射（精确调色板匹配）。
-            if (bestOverride && bestDist < 100) {
-                px[0] = (*bestOverride)[0];
-                px[1] = (*bestOverride)[1];
-                px[2] = (*bestOverride)[2];
-            }
-        }
+    PaletteMap map;
+    map.reserve(roles.size());
+    for (const auto& rc : roles) {
+        map.emplace_back(cv::Vec4b(rc.srcBgr[0], rc.srcBgr[1], rc.srcBgr[2], 255),
+                         cv::Vec4b(rc.dstBgr[0], rc.dstBgr[1], rc.dstBgr[2], 255));
     }
+    applyPaletteMap(sprite, map);
 }
 
 // ---------------------------------------------------------------------------
@@ -102,78 +88,88 @@ cv::Mat compositeCharacter(const CharacterSpec& spec) {
 // Part splitting / 部件拆分
 // ---------------------------------------------------------------------------
 
-SplitResult splitFrameToParts(const cv::Mat& frame, const CharacterSpec& spec) {
+SplitResult splitFrameToParts(const cv::Mat& frame, const TemplateSpec& spec, int view) {
     SplitResult result;
     result.present.fill(false);
+    if (frame.empty() || view < 0 || view > 2) return result;
 
-    // Part ownership rules from the template.
-    // 模板的部件归属规则。
-    //   head:      y_margin_top .. y_margin_top + headRows - 1, whole width
-    //   body:      next bodyRows rows, centre columns
-    //   arm_left:  body rows, left columns (0..2 in 14-wide content)
-    //   arm_right: body rows, right columns (11..13)
-    //   leg_left:  leg rows, cols 0..6
-    //   leg_right: leg rows, cols 7..13
+    // Per-view ownership in ABSOLUTE image coords (see the template _schema):
+    //   head:      head_rows, whole width / head_rows 行，全宽
+    //   body:      body_rows minus the two arm column sets / body_rows 行减臂列
+    //   arm_left:  body_rows ∩ arm_left_cols
+    //   arm_right: body_rows ∩ arm_right_cols
+    //   leg_left:  leg_rows[i], x <= leg_split_per_row[i]
+    //   leg_right: leg_rows[i], x >  leg_split_per_row[i]
+    // Front / side / back differ only in these lists — side legs shift the
+    // split per row, side arms use different columns.
+    // 正/侧/背只差这几张表 —— 侧面腿的分界逐行移动，侧面臂用不同的列。
+    const PartMap& m = spec.views[view].map;
 
-    const int& mx = spec.proportions.marginX;
-    const int& mt = spec.proportions.marginTop;
-    const int& cw = spec.proportions.contentWidth;
+    // Row classification lookup: y -> (kind, index).
+    // kind: 0 head, 1 body, 2 leg (index = position in legRows).
+    // 行分类查找：y -> (种类, 序号)。种类：0 头、1 躯干、2 腿（序号 = legRows 位置）。
+    struct RowInfo { char kind; int legIdx; };
+    std::map<int, RowInfo> rowOf;
+    for (int y : m.headRows) rowOf[y] = {0, -1};
+    for (int y : m.bodyRows) rowOf[y] = {1, -1};
+    for (size_t i = 0; i < m.legRows.size(); ++i) rowOf[m.legRows[i]] = {2, (int)i};
 
-    const int headY0 = mt;
-    const int headY1 = mt + spec.proportions.headRows - 1;
-    const int bodyY0 = headY1 + 1;
-    const int bodyY1 = bodyY0 + spec.proportions.bodyRows - 1;
-    const int legY0  = bodyY1 + 1;
-    const int legY1  = legY0 + spec.proportions.legRows - 1;
+    // Column classification for body rows: 0 body, 1 arm_left, 2 arm_right.
+    // 躯干行的列分类：0 躯干、1 左臂、2 右臂。
+    std::map<int, char> armColOf;
+    for (int x : m.armLeftCols) armColOf[x] = 1;
+    for (int x : m.armRightCols) armColOf[x] = 2;
 
-    // Helper: extract a region and compute its tight bbox.
-    // 辅助函数：提取区域并计算紧致 bbox。
-    auto extractPart = [&](int y0, int y1, int x0, int x1, int partIdx) {
-        // Collect opaque pixels in the region.
-        // 收集区域内的不透明像素。
-        std::vector<cv::Point> opaque;
-        for (int y = y0; y <= y1; ++y) {
-            for (int x = x0; x <= x1; ++x) {
-                if (y < 0 || y >= frame.rows || x < 0 || x >= frame.cols) continue;
-                if (frame.at<cv::Vec4b>(y, x)[3] > 0) {
-                    opaque.push_back({x, y});
+    // Bucket every opaque pixel by part id (0..5, same order as the bundle).
+    // 把每个不透明像素按部件 id（0..5，与部件包同序）入桶。
+    std::array<std::vector<cv::Point>, 6> buckets;
+    for (int y = 0; y < frame.rows; ++y) {
+        auto rit = rowOf.find(y);
+        if (rit == rowOf.end()) continue;
+        const cv::Vec4b* row = frame.ptr<cv::Vec4b>(y);
+        for (int x = 0; x < frame.cols; ++x) {
+            if (row[x][3] == 0) continue;  // transparent / 透明
+            int part = -1;
+            switch (rit->second.kind) {
+                case 0: part = 0; break;                        // head / 头
+                case 1: {                                       // body row / 躯干行
+                    auto ait = armColOf.find(x);
+                    if (ait == armColOf.end()) part = 1;        // body / 躯干
+                    else part = (ait->second == 1) ? 2 : 3;     // arm_left / arm_right
+                    break;
+                }
+                case 2: {                                       // leg row / 腿行
+                    const int i = rit->second.legIdx;
+                    part = (x <= m.legSplitPerRow[i]) ? 4 : 5;  // leg_left / leg_right
+                    break;
                 }
             }
+            if (part >= 0) buckets[part].push_back({x, y});
         }
-        if (opaque.empty()) return;
+    }
 
-        // Tight bbox / 紧致 bbox
+    // Tight-bbox extract per bucket. / 逐桶紧致 bbox 提取。
+    for (int p = 0; p < 6; ++p) {
+        const auto& opaque = buckets[p];
+        if (opaque.empty()) continue;
+
         int minX = frame.cols, minY = frame.rows, maxX = 0, maxY = 0;
-        for (const auto& p : opaque) {
-            minX = std::min(minX, p.x); maxX = std::max(maxX, p.x);
-            minY = std::min(minY, p.y); maxY = std::max(maxY, p.y);
+        for (const auto& pt : opaque) {
+            minX = std::min(minX, pt.x); maxX = std::max(maxX, pt.x);
+            minY = std::min(minY, pt.y); maxY = std::max(maxY, pt.y);
         }
         const cv::Rect box(minX, minY, maxX - minX + 1, maxY - minY + 1);
 
-        // Extract sprite / 提取精灵
         cv::Mat sprite(box.height, box.width, CV_8UC4, cv::Scalar(0, 0, 0, 0));
-        for (const auto& p : opaque) {
-            sprite.at<cv::Vec4b>(p.y - minY, p.x - minX) = frame.at<cv::Vec4b>(p.y, p.x);
+        for (const auto& pt : opaque) {
+            sprite.at<cv::Vec4b>(pt.y - minY, pt.x - minX) =
+                frame.at<cv::Vec4b>(pt.y, pt.x);
         }
 
-        result.sprites[partIdx] = sprite;
-        result.bboxes[partIdx] = box;
-        result.present[partIdx] = true;
-    };
-
-    // 1 head — whole width / 整宽
-    extractPart(headY0, headY1, mx, mx + cw - 1, 0);
-    // 2 body — centre columns (3..10 in 14-wide content)
-    extractPart(bodyY0, bodyY1, mx + 3, mx + 10, 1);
-    // 3 arm_left — cols 0..2 / 列 0..2
-    extractPart(bodyY0, bodyY1, mx, mx + 2, 2);
-    // 4 arm_right — cols 11..13 / 列 11..13
-    extractPart(bodyY0, bodyY1, mx + 11, mx + 13, 3);
-    // 5 leg_left — cols 0..6 / 列 0..6
-    extractPart(legY0, legY1, mx, mx + 6, 4);
-    // 6 leg_right — cols 7..13 / 列 7..13
-    extractPart(legY0, legY1, mx + 7, mx + 13, 5);
-
+        result.sprites[p] = sprite;
+        result.bboxes[p] = box;
+        result.present[p] = true;
+    }
     return result;
 }
 

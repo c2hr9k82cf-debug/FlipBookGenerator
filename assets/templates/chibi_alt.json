@@ -59,6 +59,24 @@
     "leg_right": 6
   },
 
+  "back_policy": {
+    "outline": "keep",
+    "hair_mid": "mirror",
+    "hair_dark": "mirror",
+    "hair_highlight": "flatten:hair_mid",
+    "skin": "keep",
+    "blush": "flatten:skin",
+    "tan": "keep",
+    "mint": "keep",
+    "white": "keep",
+    "red": "flatten:mint",
+    "pants": "keep",
+    "grey": "keep",
+    "grey_dark": "keep",
+    "gold": "flatten:mint",
+    "teal": "keep"
+  },
+
   "views": {
     "_schema": {
       "part_map": "Ownership in ABSOLUTE image coords — identical to chibi_standard (same skeleton). head_rows owns the whole width of those rows; body owns body_rows minus arm_left_cols/arm_right_cols; legs split leg_rows by leg_split_per_row (x <= split -> leg_left, x > split -> leg_right).",

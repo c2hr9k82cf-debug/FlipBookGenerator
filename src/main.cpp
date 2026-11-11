@@ -15,6 +15,9 @@
 #include "version.h"
 #include "core/align.h"
 #include "core/core.h"
+#include "core/parts.h"
+#include "core/parts_library.h"
+#include "core/template_spec.h"
 #include "spritesheet.h"
 #include "extractor.h"
 
@@ -23,6 +26,8 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <functional>
 #include <iostream>
 #include <set>
 #include <string>
@@ -105,6 +110,30 @@ void printCliUsage() {
         "      auto 自动对齐精确恢复已知扰动（已对齐输入返回恒等、mismatch 0）；\n"
         "      diff 差异掩码恰标出差异像素，叠加图着色（品红=剪影、橙=配色冲突）。\n"
         "\n"
+        "  flipbook --template-load-gate [--templates DIR] [--assets DIR]\n"
+        "      Template JSON load gate (v0.9.1): re-render each template's three\n"
+        "      views from pixels_file + palette, require byte-exact equality with\n"
+        "      the reference PNGs, and require back_policy to cover every role.\n"
+        "      模板 JSON 加载闸门（v0.9.1）：从 pixels_file + palette 重渲染三视图，\n"
+        "      必须与参考 PNG 逐字节相同；back_policy 必须覆盖全部角色。\n"
+        "\n"
+        "  flipbook --parts-semantics-gate [--templates DIR] [--assets DIR]\n"
+        "      [--fixtures DIR]\n"
+        "      Parts semantics gate (v0.9.1): applyPaletteRoles is exact src->dst\n"
+        "      (a near-miss colour must NOT be recoloured), and splitFrameToParts\n"
+        "      follows each view's part_map — compared byte-exact against the\n"
+        "      committed part bundles (sprite + bbox).\n"
+        "      部件语义闸门（v0.9.1）：applyPaletteRoles 是精确 src->dst（近似色\n"
+        "      不得被换色），splitFrameToParts 按逐视图 part_map 划分 —— 与已提交\n"
+        "      部件包（精灵 + bbox）逐字节比对。\n"
+        "\n"
+        "  flipbook --parts-library-gate\n"
+        "      Parts library gate (v0.9.1): load a synthesised library, then\n"
+        "      verify every known bad shape is refused (missing files, bad json,\n"
+        "      slot mismatch, wrong size, ambiguous back, bad roleColors...).\n"
+        "      部件库闸门（v0.9.1）：加载合成库，再验证已知坏形态全部被拒绝\n"
+        "      （缺文件、坏 json、槽位不符、尺寸错、背面歧义、roleColors 坏……）。\n"
+        "\n"
         "  flipbook --fourdir --front F.png --side S.png --back B.png\n"
         "      [--chips DIR] --out DIR\n"
         "      The app pipeline: extract palettes from three template-aligned\n"
@@ -143,6 +172,14 @@ struct CliArgs {
 
     // Alignment diagnostics gate (v0.9.0) / 对齐诊断闸门（v0.9.0）
     std::string alignCase;   // apply | auto | diff
+
+    // Template / parts / library gates (v0.9.1) / 模板 / 部件 / 库闸门（v0.9.1）
+    std::string templates = "assets/templates";
+    std::string assets    = "assets";
+    std::string fixtures  = "tests/fixtures";
+    bool templateLoadGate   = false;
+    bool partsSemanticsGate = false;
+    bool partsLibraryGate   = false;
 };
 
 bool parseArgs(int argc, char** argv, CliArgs& a, std::string& err) {
@@ -192,6 +229,21 @@ bool parseArgs(int argc, char** argv, CliArgs& a, std::string& err) {
         } else if (s == "--align-gate") {
             const char* v = needValue("--align-gate"); if (!v) return false;
             a.alignCase = v;
+        } else if (s == "--template-load-gate") {
+            a.templateLoadGate = true;
+        } else if (s == "--parts-semantics-gate") {
+            a.partsSemanticsGate = true;
+        } else if (s == "--parts-library-gate") {
+            a.partsLibraryGate = true;
+        } else if (s == "--templates") {
+            const char* v = needValue("--templates"); if (!v) return false;
+            a.templates = v;
+        } else if (s == "--assets") {
+            const char* v = needValue("--assets"); if (!v) return false;
+            a.assets = v;
+        } else if (s == "--fixtures") {
+            const char* v = needValue("--fixtures"); if (!v) return false;
+            a.fixtures = v;
         } else if (s == "--fourdir") {
             a.fourdir = true;
         } else if (s == "--front") {
@@ -854,6 +906,386 @@ int runAlignGate(const CliArgs& a) {
     return failures ? 1 : 0;
 }
 
+// Count differing pixels (any channel), for gate diagnostics.
+// 统计差异像素（任一通道），供闸门诊断用。
+int countPixelDiff(const cv::Mat& a, const cv::Mat& b) {
+    if (a.size() != b.size() || a.type() != b.type()) return -1;
+    int diff = 0;
+    for (int y = 0; y < a.rows; ++y) {
+        const cv::Vec4b* pa = a.ptr<cv::Vec4b>(y);
+        const cv::Vec4b* pb = b.ptr<cv::Vec4b>(y);
+        for (int x = 0; x < a.cols; ++x)
+            if (pa[x] != pb[x]) ++diff;
+    }
+    return diff;
+}
+
+// Template JSON load gate (v0.9.1): loading + re-rendering a template must be
+// byte-exact against the committed reference PNGs, and back_policy must cover
+// every palette role (policy lives in the JSON, not in code).
+// 模板 JSON 加载闸门（v0.9.1）：加载 + 重渲染必须与已提交参考 PNG 逐字节相同，
+// back_policy 必须覆盖全部调色板角色（策略在 JSON 里，不在代码里）。
+int runTemplateLoadGate(const CliArgs& a) {
+    struct Case { const char* json; const char* refBase; };
+    const Case cases[] = {
+        {"chibi_standard.json", "character_32"},
+        {"chibi_alt.json",      "character_alt"},
+    };
+    const char* viewSuffix[3] = {"", "_side", "_back"};
+    const char* viewNames[3]  = {"front", "side", "back"};
+    int failures = 0;
+
+    for (const Case& c : cases) {
+        fb::TemplateSpec spec;
+        std::string err;
+        if (!fb::loadTemplateSpec(a.templates + "/" + c.json, spec, err)) {
+            std::cout << c.json << ": load FAILED: " << err << "   FAIL\n";
+            ++failures;
+            continue;
+        }
+        std::cout << c.json << ": loaded — palette " << spec.palette.size()
+                  << " roles, " << spec.paletteChars.size() << " pixel chars\n";
+        for (const auto& kv : spec.palette) {
+            if (!spec.backPolicy.count(kv.first)) {
+                std::cout << "  back_policy: role '" << kv.first
+                          << "' uncovered   FAIL\n";
+                ++failures;
+            }
+        }
+        for (int v = 0; v < 3; ++v) {
+            cv::Mat rendered = fb::renderTemplateView(spec, v, err);
+            const std::string refPath =
+                a.assets + "/" + c.refBase + viewSuffix[v] + ".png";
+            const cv::Mat ref = cv::imread(refPath, cv::IMREAD_UNCHANGED);
+            if (rendered.empty()) {
+                std::cout << "  " << viewNames[v] << ": render FAILED: " << err
+                          << "   FAIL\n";
+                ++failures;
+                continue;
+            }
+            if (ref.empty()) {
+                std::cout << "  " << viewNames[v] << ": cannot read " << refPath
+                          << "   FAIL\n";
+                ++failures;
+                continue;
+            }
+            const int diff = countPixelDiff(rendered, ref);
+            if (diff != 0) {
+                std::cout << "  " << viewNames[v] << ": differs from " << refPath
+                          << " (" << diff << " px)   FAIL\n";
+                ++failures;
+            } else {
+                std::cout << "  " << viewNames[v]
+                          << ": byte-exact vs reference   OK\n";
+            }
+        }
+    }
+    std::cout << (failures ? "TEMPLATE LOAD GATE FAIL\n" : "TEMPLATE LOAD GATE OK\n");
+    return failures ? 1 : 0;
+}
+
+// Parts semantics gate (v0.9.1):
+//   (a) applyPaletteRoles is EXACT src→dst — the old fuzzy match recoloured
+//       any pixel within distance^2 < 100, which ate near-miss hand-painted
+//       colours. A near-miss pixel must survive untouched.
+//   (b) splitFrameToParts follows the PER-VIEW part_map — every split must
+//       match the committed part bundle (sprite + tight bbox) byte-exactly.
+// 部件语义闸门（v0.9.1）：
+//   (a) applyPaletteRoles 是精确 src→dst —— 旧的模糊匹配会换掉距离平方 < 100
+//       的任何像素，误吃手绘近似色。近似像素必须原样幸存。
+//   (b) splitFrameToParts 按逐视图 part_map —— 每次切分必须与已提交部件包
+//       （精灵 + 紧致 bbox）逐字节一致。
+int runPartsSemanticsGate(const CliArgs& a) {
+    int failures = 0;
+    std::string err;
+
+    // ---- (a) exact remap / 精确重映射 ----
+    {
+        const cv::Vec3b src(200, 150, 100), dst(7, 8, 9);       // BGR
+        const cv::Vec3b src2(30, 20, 10), dst2(40, 50, 60);     // BGR
+        cv::Mat spr(1, 4, CV_8UC4);
+        spr.at<cv::Vec4b>(0, 0) = cv::Vec4b(src[0], src[1], src[2], 255);
+        // distance^2 from src = 75 < 100 — the OLD fuzzy match ate this one.
+        // 与 src 的距离平方 = 75 < 100 —— 旧的模糊匹配会吃掉这个像素。
+        spr.at<cv::Vec4b>(0, 1) =
+            cv::Vec4b(src[0] + 5, src[1] + 5, src[2] + 5, 255);
+        spr.at<cv::Vec4b>(0, 2) = cv::Vec4b(src[0], src[1], src[2], 0);
+        spr.at<cv::Vec4b>(0, 3) = cv::Vec4b(src2[0], src2[1], src2[2], 255);
+
+        const std::vector<fb::PartLayer::RoleColor> roles = {
+            {"r1", src, dst},
+            {"r2", src2, dst2},
+        };
+        fb::applyPaletteRoles(spr, roles);
+
+        struct Check { int x; cv::Vec4b want; const char* what; };
+        const Check checks[] = {
+            {0, cv::Vec4b(dst[0], dst[1], dst[2], 255), "exact src -> dst"},
+            {1, cv::Vec4b(src[0] + 5, src[1] + 5, src[2] + 5, 255),
+             "near-miss colour untouched (old fuzzy match would eat it)"},
+            {2, cv::Vec4b(src[0], src[1], src[2], 0),
+             "transparent pixel untouched, alpha preserved"},
+            {3, cv::Vec4b(dst2[0], dst2[1], dst2[2], 255),
+             "second role exact src -> dst"},
+        };
+        for (const Check& ck : checks) {
+            if (spr.at<cv::Vec4b>(0, ck.x) != ck.want) {
+                std::cout << "  exact remap: " << ck.what << "   FAIL\n";
+                ++failures;
+            } else {
+                std::cout << "  exact remap: " << ck.what << "   OK\n";
+            }
+        }
+    }
+
+    // ---- (b) per-view split vs committed bundles / 逐视图切分 vs 已提交部件包 ----
+    struct Case { const char* json; const char* refBase; };
+    const Case cases[] = {
+        {"chibi_standard.json", "character_32"},
+        {"chibi_alt.json",      "character_alt"},
+    };
+    const char* viewSuffix[3] = {"", "_side", "_back"};
+    const char* partNames[6]  = {"head", "body", "arm_left",
+                                 "arm_right", "leg_left", "leg_right"};
+
+    for (const Case& c : cases) {
+        fb::TemplateSpec spec;
+        if (!fb::loadTemplateSpec(a.templates + "/" + c.json, spec, err)) {
+            std::cout << c.json << ": load FAILED: " << err << "   FAIL\n";
+            ++failures;
+            continue;
+        }
+        for (int v = 0; v < 3; ++v) {
+            const std::string framePath =
+                a.assets + "/" + c.refBase + viewSuffix[v] + ".png";
+            const cv::Mat frame = cv::imread(framePath, cv::IMREAD_UNCHANGED);
+            if (frame.empty()) {
+                std::cout << c.refBase << viewSuffix[v] << ": cannot read "
+                          << framePath << "   FAIL\n";
+                ++failures;
+                continue;
+            }
+            const fb::SplitResult sr = fb::splitFrameToParts(frame, spec, v);
+            const std::string bundleDir =
+                a.fixtures + "/" + c.refBase + viewSuffix[v];
+            for (int p = 0; p < 6; ++p) {
+                const std::string tag =
+                    std::string(c.refBase) + viewSuffix[v] + "/" + partNames[p];
+                std::ifstream bf(bundleDir + "/" + partNames[p] + "_bbox.txt");
+                int x = 0, y = 0, w = 0, h = 0;
+                if (!(bf >> x >> y >> w >> h)) {
+                    std::cout << "  " << tag << ": fixture bbox missing   FAIL\n";
+                    ++failures;
+                    continue;
+                }
+                const cv::Mat fpng = cv::imread(
+                    bundleDir + "/" + partNames[p] + ".png", cv::IMREAD_UNCHANGED);
+                if (fpng.empty()) {
+                    std::cout << "  " << tag << ": fixture png missing   FAIL\n";
+                    ++failures;
+                    continue;
+                }
+                const cv::Rect want(x, y, w, h);
+                if (!sr.present[p]) {
+                    std::cout << "  " << tag << ": split produced nothing   FAIL\n";
+                    ++failures;
+                } else if (sr.bboxes[p] != want) {
+                    std::cout << "  " << tag << ": bbox got ("
+                              << sr.bboxes[p].x << "," << sr.bboxes[p].y << ","
+                              << sr.bboxes[p].width << "," << sr.bboxes[p].height
+                              << ") want (" << x << "," << y << "," << w << ","
+                              << h << ")   FAIL\n";
+                    ++failures;
+                } else {
+                    const int diff = countPixelDiff(sr.sprites[p], fpng);
+                    if (diff != 0) {
+                        std::cout << "  " << tag << ": sprite differs ("
+                                  << diff << " px)   FAIL\n";
+                        ++failures;
+                    } else {
+                        std::cout << "  " << tag
+                                  << ": bbox+sprite byte-exact   OK\n";
+                    }
+                }
+            }
+        }
+    }
+    std::cout << (failures ? "PARTS SEMANTICS GATE FAIL\n"
+                           : "PARTS SEMANTICS GATE OK\n");
+    return failures ? 1 : 0;
+}
+
+// Parts library gate (v0.9.1): a synthesised library must load with all
+// metadata intact, and every known bad shape must be refused with a reason.
+// 部件库闸门（v0.9.1）：合成库必须完整加载，已知坏形态必须全部被拒并给出原因。
+int runPartsLibraryGate(const CliArgs& a) {
+    (void)a;
+    namespace fs = std::filesystem;
+    int failures = 0;
+
+    const fs::path root =
+        fs::temp_directory_path() / "flipbook_parts_library_gate";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+
+    auto writePng = [](const fs::path& p, const cv::Vec4b& col) {
+        cv::Mat img(32, 32, CV_8UC4, cv::Scalar(0, 0, 0, 0));
+        for (int y = 10; y < 20; ++y)
+            for (int x = 10; x < 20; ++x)
+                img.at<cv::Vec4b>(y, x) = col;
+        cv::imwrite(p.string(), img);
+    };
+    auto writeText = [](const fs::path& p, const std::string& text) {
+        std::ofstream f(p);
+        f << text;
+    };
+    // BGR (64,124,231) == JSON RGB [231,124,64] / BGR (64,124,231) 即 JSON RGB [231,124,64]
+    const cv::Vec4b hairCol(64, 124, 231, 255);
+    const std::string hairJson = R"({
+  "name": "hair_test",
+  "slot": "hair",
+  "zOrder": 30,
+  "anchors": { "front": [15, 12], "side": [16, 12] },
+  "roleColors": [
+    { "role": "hair_mid", "src": [231, 124, 64], "dst": [120, 80, 200] },
+    { "role": "hair_dark", "dst": [80, 50, 150] }
+  ],
+  "back": "auto",
+  "silhouette": "template"
+})";
+    const std::string topJson = R"({
+  "name": "shirt_test",
+  "slot": "top",
+  "zOrder": 20,
+  "back": "file",
+  "silhouette": "template"
+})";
+
+    auto makeItem = [&](const fs::path& dir, const std::string& json) {
+        fs::create_directories(dir);
+        writePng(dir / "front.png", hairCol);
+        writePng(dir / "side.png", hairCol);
+        writeText(dir / "item.json", json);
+    };
+
+    // ---- happy path / 正向 ----
+    {
+        makeItem(root / "hair" / "hair_test", hairJson);
+        makeItem(root / "top" / "shirt_test", topJson);
+        writePng(root / "top" / "shirt_test" / "back.png", hairCol);
+
+        fb::PartsLibrary lib;
+        std::string err;
+        if (!fb::loadPartsLibrary(root.string(), cv::Size(32, 32), lib, err)) {
+            std::cout << "  happy path: load FAILED: " << err << "   FAIL\n";
+            ++failures;
+        } else if (lib.items.size() != 2) {
+            std::cout << "  happy path: expected 2 items, got " << lib.items.size()
+                      << "   FAIL\n";
+            ++failures;
+        } else {
+            auto check = [&](bool ok, const char* what) {
+                if (ok) {
+                    std::cout << "  happy path: " << what << "   OK\n";
+                } else {
+                    std::cout << "  happy path: " << what << "   FAIL\n";
+                    ++failures;
+                }
+            };
+            const fb::LibraryItem* hair = lib.find("hair", "hair_test");
+            const fb::LibraryItem* top  = lib.find("top", "shirt_test");
+            check(hair != nullptr && top != nullptr,
+                  "find(hair_test) + find(shirt_test)");
+            if (hair) {
+                check(hair->zOrder == 30 && hair->backMode == "auto" &&
+                      hair->silhouette == "template",
+                      "zOrder/back/silhouette parsed");
+                check(hair->hasAnchor[0] && hair->anchors[0] == cv::Point(15, 12) &&
+                      hair->hasAnchor[1] && hair->anchors[1] == cv::Point(16, 12) &&
+                      !hair->hasAnchor[2],
+                      "anchors per view");
+                check(hair->roleColors.size() == 2 &&
+                      hair->roleColors[0].hasSrc &&
+                      hair->roleColors[0].srcBgr == cv::Vec3b(64, 124, 231) &&
+                      hair->roleColors[0].dstBgr == cv::Vec3b(200, 80, 120) &&
+                      !hair->roleColors[1].hasSrc &&
+                      hair->roleColors[1].dstBgr == cv::Vec3b(150, 50, 80),
+                      "roleColors src/dst (RGB->BGR)");
+                check(!hair->views[0].empty() && !hair->views[1].empty() &&
+                      hair->views[2].empty(),
+                      "front+side loaded, back empty under back:\"auto\"");
+            }
+            if (top) {
+                check(top->backMode == "file" && !top->views[2].empty(),
+                      "back:\"file\" loads back.png");
+            }
+        }
+    }
+
+    // ---- error paths / 错误路径 ----
+    struct BadCase {
+        const char* name;
+        std::function<void(const fs::path&)> mutate;
+    };
+    const BadCase bads[] = {
+        {"missing_front",
+         [&](const fs::path& d) { fs::remove(d / "front.png"); }},
+        {"missing_side",
+         [&](const fs::path& d) { fs::remove(d / "side.png"); }},
+        {"missing_item_json",
+         [&](const fs::path& d) { fs::remove(d / "item.json"); }},
+        {"bad_json",
+         [&](const fs::path& d) { writeText(d / "item.json", "{ not json"); }},
+        {"slot_mismatch",
+         [&](const fs::path& d) {
+             writeText(d / "item.json", R"({"name":"hair_test","slot":"top"})");
+         }},
+        {"wrong_size",
+         [&](const fs::path& d) {
+             cv::Mat img(24, 24, CV_8UC4, cv::Scalar(0, 0, 0, 0));
+             cv::imwrite((d / "front.png").string(), img);
+         }},
+        {"file_back_missing",
+         [&](const fs::path& d) {
+             writeText(d / "item.json",
+                       R"({"name":"hair_test","back":"file","silhouette":"template"})");
+         }},
+        {"auto_with_back",
+         [&](const fs::path& d) { writePng(d / "back.png", hairCol); }},
+        {"roles_no_dst",
+         [&](const fs::path& d) {
+             writeText(d / "item.json",
+                       R"({"name":"hair_test","roleColors":[{"role":"hair_mid"}]})");
+         }},
+        {"bad_silhouette",
+         [&](const fs::path& d) {
+             writeText(d / "item.json",
+                       R"({"name":"hair_test","silhouette":"freeform"})");
+         }},
+    };
+    for (const BadCase& bc : bads) {
+        const fs::path br = root / "bad" / bc.name;
+        makeItem(br / "hair" / "hair_test", hairJson);
+        bc.mutate(br / "hair" / "hair_test");
+
+        fb::PartsLibrary lib;
+        std::string err;
+        if (fb::loadPartsLibrary(br.string(), cv::Size(32, 32), lib, err)) {
+            std::cout << "  " << bc.name << ": was accepted, must be refused   FAIL\n";
+            ++failures;
+        } else if (err.empty()) {
+            std::cout << "  " << bc.name << ": refused but no reason given   FAIL\n";
+            ++failures;
+        } else {
+            std::cout << "  " << bc.name << ": refused (" << err << ")   OK\n";
+        }
+    }
+
+    fs::remove_all(root, ec);
+    std::cout << (failures ? "PARTS LIBRARY GATE FAIL\n" : "PARTS LIBRARY GATE OK\n");
+    return failures ? 1 : 0;
+}
+
 int runPaletteGate(const CliArgs& a) {
     fb::ChipSet cs;
     std::string err;
@@ -1204,6 +1636,9 @@ int runCli(int argc, char** argv) {
     if (a.paletteGate) return runPaletteGate(a);
     if (a.fourdirGate) return runFourdirGate(a);
     if (!a.alignCase.empty()) return runAlignGate(a);
+    if (a.templateLoadGate)   return runTemplateLoadGate(a);
+    if (a.partsSemanticsGate) return runPartsSemanticsGate(a);
+    if (a.partsLibraryGate)   return runPartsLibraryGate(a);
     if (a.fourdir)     return runFourdir(a);
     if (a.allPresets)  return runPresets(a, {"idle", "walk_side", "walk_front", "walk_up"});
     if (!a.preset.empty()) return runPresets(a, {a.preset});
