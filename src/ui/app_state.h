@@ -21,6 +21,7 @@ struct ViewSlot {
     std::string path;      // loaded image path / 已加载图的路径
     cv::Mat image;         // BGRA / BGRA 图
     bool loaded() const { return !image.empty(); }
+    void clear() { path.clear(); image = cv::Mat(); }
 };
 
 class AppState {
@@ -39,9 +40,7 @@ public:
     std::string pipelineError;   // extraction/pipeline message / 提取与管线错误
 
     // Status bar text / 状态栏文本
-    std::string status =
-        "Load three template-aligned views (front / side / back) to begin."
-        " / 载入三张模板对齐视图（front / side / back）以开始。";
+    std::string status = "拖入三张模板对齐视图（正面 / 侧面 / 背面）以开始。";
 
     // Bumped whenever the GL preview textures must be re-uploaded.
     // GL 预览纹理需重传时自增。
@@ -53,6 +52,12 @@ public:
     // Load one view's image, then auto-run the pipeline when all three are in.
     // 载入一张视图图；三张齐备时自动跑管线。
     bool setView(int idx, const std::string& path);
+
+    // Drop one slot (or everything) and reset the pipeline — so the user can
+    // start over without restarting the app. / 清掉一个槽（或全部）并重置管线 ——
+    // 用户不必重启应用就能重来。
+    void clearView(int idx);
+    void clearAll();
 
     // Run the core pipeline (extract -> reskin -> assemble). / 跑核心管线。
     bool runPipeline();

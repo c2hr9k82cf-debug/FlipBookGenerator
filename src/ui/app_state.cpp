@@ -58,6 +58,22 @@ bool AppState::setView(int idx, const std::string& path) {
     return runPipeline();
 }
 
+void AppState::clearView(int idx) {
+    if (idx < 0 || idx > 2) return;
+    views[idx].clear();
+    ++revision;
+    runPipeline();   // recompute status for the remaining views / 为剩余视图重算状态
+}
+
+void AppState::clearAll() {
+    for (ViewSlot& v : views) v.clear();
+    result = fb::FourDirResult{};
+    hasResult = false;
+    pipelineError.clear();
+    ++revision;
+    status = "已清空 —— 拖入三张模板对齐视图重新开始。";
+}
+
 bool AppState::runPipeline() {
     hasResult = false;
     pipelineError.clear();

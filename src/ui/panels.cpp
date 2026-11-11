@@ -1,7 +1,11 @@
-// panels.cpp — the minimal panel set (input slots / extraction / preview /
-// status / export). Per CLAUDE.md: no docking polish, no scope creep.
-// 最小面板集（输入槽 / 提取结果 / 预览 / 状态 / 导出）。按 CLAUDE.md：
-// 不做 docking 打磨，不扩范围。
+// panels.cpp — the panel set: inputs / extraction / export / animated preview.
+// 面板集：输入 / 提取 / 导出 / 动画预览。
+//
+// Layout rules learned from the first UI screenshot: no nested bordered boxes
+// ("two layers" look), the palette list lives in a collapsed header, and the
+// preview is a per-row animation player with user-set fps and zoom.
+// 从第一版截图学到的排版规矩：不套带框子面板（"两层"观感）、配色列表收进折叠头、
+// 预览是逐行动画播放器（帧率、大小由用户设定）。
 
 #include "panels.h"
 #include "texture.h"
@@ -35,6 +39,33 @@ ImVec4 toImVec4(const cv::Vec4b& c) {
     return ImVec4(c[2] / 255.f, c[1] / 255.f, c[0] / 255.f, c[3] / 255.f);
 }
 
+void drawThemeButton() {
+    static bool lightTheme = false;
+    if (ImGui::Button(lightTheme ? "黑色主题" : "白色主题")) {
+        lightTheme = !lightTheme;
+        if (!lightTheme) {
+            ImGui::StyleColorsDark();
+        } else {
+            ImGui::StyleColorsLight();
+            // A cleaner white than StyleColorsLight's grey defaults.
+            // 比 StyleColorsLight 的默认灰更干净的白。
+            ImGuiStyle& style = ImGui::GetStyle();
+            style.Colors[ImGuiCol_WindowBg]  = ImVec4(1.f, 1.f, 1.f, 1.f);
+            style.Colors[ImGuiCol_ChildBg]   = ImVec4(0.97f, 0.97f, 0.98f, 1.f);
+            style.Colors[ImGuiCol_PopupBg]   = ImVec4(1.f, 1.f, 1.f, 1.f);
+            style.Colors[ImGuiCol_Text]      = ImVec4(0.12f, 0.12f, 0.14f, 1.f);
+        }
+    }
+}
+
+// UV rectangle of one 32x32 cell in the sheet texture. / 表纹理里一格 32x32 的 UV 矩形。
+void cellUv(const fb::FourDirResult& res, int col, int row,
+            ImVec2& uv0, ImVec2& uv1) {
+    const float w = (float)res.sheet.cols, h = (float)res.sheet.rows;
+    uv0 = ImVec2(col * 32.f / w, row * 32.f / h);
+    uv1 = ImVec2((col + 1) * 32.f / w, (row + 1) * 32.f / h);
+}
+
 }  // namespace
 
 void PreviewTextures::release() {
@@ -57,15 +88,26 @@ void PreviewTextures::sync(AppState& st) {
 void drawMainContent(AppState& st, PreviewTextures& tex) {
     tex.sync(st);
 
-    // ---- left column: inputs + extraction + status + export ----
-    // 左栏：输入 + 提取 + 状态 + 导出
-    ImGui::BeginChild("left", ImVec2(430, 0), true);
+    // ---- top bar: title + theme + version ----
+    // 顶栏：标题 + 主题 + 版本
+    ImGui::TextUnformatted("FlipBookGenerator");
+    ImGui::SameLine();
+    ImGui::TextDisabled("V" FLIPBOOK_VERSION);
+    ImGui::SameLine(ImGui::GetWindowWidth() - 110.f);
+    drawThemeButton();
+    ImGui::Separator();
 
+    const float kLeftW = 360.f;
+    ImGui::BeginChild("left", ImVec2(kLeftW, 0), false);
+
+    // ---- inputs ----
+    // 输入
     ImGui::TextUnformatted("输入视图");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("全部清除")) st.clearAll();
     ImGui::TextDisabled("模板对齐的 32x32 PNG（拖入窗口或点「选择」）。");
-
     for (int v = 0; v < 3; ++v) {
-        ImGui::Separator();
+        ImGui::Spacing();
         ImGui::TextUnformatted(kSlotLabels[v]);
         if (tex.slot[v]) {
             ImGui::Image((ImTextureID)(intptr_t)tex.slot[v], ImVec2(64, 64));
@@ -86,46 +128,68 @@ void drawMainContent(AppState& st, PreviewTextures& tex) {
                 {"图片文件", "*.png *.jpg *.jpeg *.bmp"}).result();
             if (!files.empty()) st.setView(v, files[0]);
         }
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!st.views[v].loaded());
+        if (ImGui::Button(("清除##" + std::to_string(v)).c_str())) st.clearView(v);
+        ImGui::EndDisabled();
         ImGui::EndGroup();
     }
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("配色提取");
-    if (!st.pipelineError.empty()) {
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.f, 0.38f, 0.38f, 1.f));
-        ImGui::TextWrapped("%s", st.pipelineError.c_str());
-        ImGui::PopStyleColor();
-    } else if (st.hasResult) {
-        for (int v = 0; v < 3; ++v) {
-            ImGui::Text("%s：%d 种颜色", kViewNames[v],
-                        (int)st.result.maps[v].size());
-            for (size_t i = 0; i < st.result.maps[v].size(); ++i) {
-                const auto& sw = st.result.maps[v][i];
-                const std::string id =
-                    "##sw" + std::to_string(v) + "_" + std::to_string(i);
-                ImGui::ColorButton((id + "a").c_str(), toImVec4(sw.first),
-                                   ImGuiColorEditFlags_NoTooltip |
-                                       ImGuiColorEditFlags_NoDragDrop,
-                                   ImVec2(14, 14));
-                ImGui::SameLine();
-                ImGui::TextUnformatted("->");
-                ImGui::SameLine();
-                ImGui::ColorButton((id + "b").c_str(), toImVec4(sw.second),
-                                   ImGuiColorEditFlags_NoTooltip |
-                                       ImGuiColorEditFlags_NoDragDrop,
-                                   ImVec2(14, 14));
-                ImGui::SameLine();
-                ImGui::TextDisabled("(%d,%d,%d) -> (%d,%d,%d)",
-                                    sw.first[2], sw.first[1], sw.first[0],
-                                    sw.second[2], sw.second[1], sw.second[0]);
+    // ---- palette extraction, collapsed: the swatch list is long ----
+    // 配色提取，默认收起：色对列表很长
+    ImGui::Spacing();
+    std::string summary;
+    if (!st.pipelineError.empty()) summary = "提取出错";
+    else if (st.hasResult) {
+        size_t n = st.result.maps[0].size() + st.result.maps[1].size() +
+                   st.result.maps[2].size();
+        summary = "3 视图 · 共 " + std::to_string(n) + " 条颜色映射";
+    } else summary = "等待输入";
+    const std::string head = "配色提取###palette";
+    if (ImGui::CollapsingHeader(head.c_str())) {
+        if (!st.pipelineError.empty()) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.f, 0.38f, 0.38f, 1.f));
+            ImGui::TextWrapped("%s", st.pipelineError.c_str());
+            ImGui::PopStyleColor();
+        } else if (st.hasResult) {
+            for (int v = 0; v < 3; ++v) {
+                ImGui::Text("%s：%d 种颜色", kViewNames[v],
+                            (int)st.result.maps[v].size());
+                for (size_t i = 0; i < st.result.maps[v].size(); ++i) {
+                    const auto& sw = st.result.maps[v][i];
+                    const std::string id =
+                        "##sw" + std::to_string(v) + "_" + std::to_string(i);
+                    ImGui::ColorButton((id + "a").c_str(), toImVec4(sw.first),
+                                       ImGuiColorEditFlags_NoTooltip |
+                                           ImGuiColorEditFlags_NoDragDrop,
+                                       ImVec2(14, 14));
+                    ImGui::SameLine();
+                    ImGui::TextUnformatted("->");
+                    ImGui::SameLine();
+                    ImGui::ColorButton((id + "b").c_str(), toImVec4(sw.second),
+                                       ImGuiColorEditFlags_NoTooltip |
+                                           ImGuiColorEditFlags_NoDragDrop,
+                                       ImVec2(14, 14));
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("(%d,%d,%d) -> (%d,%d,%d)",
+                                        sw.first[2], sw.first[1], sw.first[0],
+                                        sw.second[2], sw.second[1], sw.second[0]);
+                }
             }
+        } else {
+            ImGui::TextDisabled("等待输入");
         }
     } else {
-        ImGui::TextDisabled("等待输入");
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", summary.c_str());
     }
 
+    // ---- export ----
+    // 导出
+    ImGui::Spacing();
     ImGui::Separator();
-    ImGui::TextWrapped("%s", st.status.c_str());
+    ImGui::TextUnformatted("导出");
+    ImGui::TextDisabled("点击后弹出保存窗口，由你选择存放位置。");
     ImGui::BeginDisabled(!st.hasResult);
     if (ImGui::Button("导出大图 PNG...")) {
         const std::string path = pfd::save_file(
@@ -139,56 +203,56 @@ void drawMainContent(AppState& st, PreviewTextures& tex) {
     }
     ImGui::EndDisabled();
 
-    // Theme toggle: dark is the default, white is one click away.
-    // 主题切换：默认黑色，白色一键即切。
-    ImGui::SameLine();
-    static bool lightTheme = false;
-    if (ImGui::Button(lightTheme ? "黑色主题" : "白色主题")) {
-        lightTheme = !lightTheme;
-        if (!lightTheme) {
-            ImGui::StyleColorsDark();
-        } else {
-            ImGui::StyleColorsLight();
-            // A cleaner white than StyleColorsLight's grey defaults.
-            // 比 StyleColorsLight 的默认灰更干净的白。
-            ImGuiStyle& style = ImGui::GetStyle();
-            style.Colors[ImGuiCol_WindowBg]  = ImVec4(1.f, 1.f, 1.f, 1.f);
-            style.Colors[ImGuiCol_ChildBg]   = ImVec4(0.97f, 0.97f, 0.98f, 1.f);
-            style.Colors[ImGuiCol_PopupBg]   = ImVec4(1.f, 1.f, 1.f, 1.f);
-            style.Colors[ImGuiCol_Text]      = ImVec4(0.12f, 0.12f, 0.14f, 1.f);
-        }
-    }
-    ImGui::TextDisabled("V%s", FLIPBOOK_VERSION);
     ImGui::EndChild();
-
     ImGui::SameLine();
 
-    // ---- right column: the 8x6 preview ----
-    // 右栏：8x6 预览
-    ImGui::BeginChild("right", ImVec2(0, 0), true);
-    ImGui::TextUnformatted("预览");
-    static int zoom = 4;
-    ImGui::SliderInt("缩放", &zoom, 1, 16);
+    // ---- right column: animated preview ----
+    // 右栏：动画预览
+    ImGui::BeginChild("right", ImVec2(0, 0), false);
+
+    static bool playing = true;
+    static int fps = 8;
+    static int zoom = 3;
+    static float clockTime = 0.f;
+    if (playing) clockTime += ImGui::GetIO().DeltaTime;
+
+    if (ImGui::Button(playing ? "暂停" : "播放")) playing = !playing;
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(140);
+    ImGui::SliderInt("帧率", &fps, 1, 30);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(140);
+    ImGui::SliderInt("大小", &zoom, 1, 16);
+    ImGui::SameLine();
+    ImGui::TextDisabled("fps %d · 放大 x%d", fps, zoom);
 
     if (st.hasResult && tex.sheet) {
-        const float cell = 32.f * zoom;
-        const ImVec2 origin = ImGui::GetCursorScreenPos();
+        const float cell = 32.f * (float)zoom;
+        // Every row plays its own 6-cell loop; idle rows breathe (f0 f1 f0 f1
+        // f0 f1 baked into the sheet) and walk rows run their full cycle.
+        // 每行播自己的 6 格循环；待机行呼吸（表里就是 f0 f1 f0 f1 f0 f1），
+        // 行走行走完整循环。
+        const int frame = ((int)(clockTime * (float)fps) % fb::SHEET_COLS +
+                           fb::SHEET_COLS) % fb::SHEET_COLS;
         for (int r = 0; r < fb::SHEET_ROWS; ++r) {
-            ImGui::SetCursorScreenPos(ImVec2(origin.x, origin.y + r * cell));
             ImGui::TextUnformatted(kRowLabels[r]);
+            ImGui::SameLine(90.f);
+            ImVec2 uv0, uv1;
+            cellUv(st.result, frame, r, uv0, uv1);
+            ImGui::Image((ImTextureID)(intptr_t)tex.sheet, ImVec2(cell, cell),
+                         uv0, uv1);
         }
-        ImGui::SetCursorScreenPos(ImVec2(origin.x + 110.f, origin.y));
-        ImGui::Image((ImTextureID)(intptr_t)tex.sheet,
-                     ImVec2(st.result.sheet.cols * zoom,
-                            st.result.sheet.rows * zoom));
-        ImGui::SetCursorScreenPos(
-            ImVec2(origin.x, origin.y + st.result.sheet.rows * zoom + 8.f));
-        ImGui::TextDisabled("%dx%d，最近邻放大 x%d",
-                            st.result.sheet.cols, st.result.sheet.rows, zoom);
+        ImGui::TextDisabled("每行 6 帧循环 · %dx%d · 最近邻放大",
+                            st.result.sheet.cols, st.result.sheet.rows);
     } else {
-        ImGui::TextDisabled("尚无预览");
+        ImGui::TextDisabled("尚无预览 —— 载入三张视图后自动开播");
     }
     ImGui::EndChild();
+
+    // ---- status bar ----
+    // 状态栏
+    ImGui::Separator();
+    ImGui::TextWrapped("%s", st.status.c_str());
 }
 
 }  // namespace ui

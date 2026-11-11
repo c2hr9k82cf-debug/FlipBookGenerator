@@ -144,8 +144,16 @@ int main() {
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        ImGui::SetNextWindowSize(ImVec2(1280, 800), ImGuiCond_FirstUseEver);
-        ImGui::Begin(title.c_str());
+        // One borderless window filling the GLFW window — the old framed window
+        // plus framed child panels read as ugly "double boxes".
+        // 一个无边框窗口铺满 GLFW 窗口 —— 旧的外框窗 + 带框子面板看着是丑陋的"两层"。
+        ImGui::SetNextWindowPos(ImVec2(0, 0));
+        ImGui::SetNextWindowSize(io.DisplaySize);
+        ImGui::Begin("##main", nullptr,
+                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                         ImGuiWindowFlags_NoResize |
+                         ImGuiWindowFlags_NoSavedSettings |
+                         ImGuiWindowFlags_NoBringToFrontOnFocus);
         fb::ui::drawMainContent(st, tex);
         ImGui::End();
 
