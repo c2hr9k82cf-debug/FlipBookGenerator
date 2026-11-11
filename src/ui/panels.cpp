@@ -8,6 +8,7 @@
 // 预览是逐行动画播放器（帧率、大小由用户设定）。
 
 #include "panels.h"
+#include "dressup_panel.h"
 #include "part_editor_panel.h"
 #include "texture.h"
 #include "version.h"
@@ -78,12 +79,28 @@ void PreviewTextures::release() {
     deleteTexture(slotDiff[1]);
     deleteTexture(slotDiff[2]);
     deleteTexture(sheet);
+    deleteTexture(dressup[0]);
+    deleteTexture(dressup[1]);
+    deleteTexture(dressup[2]);
     slot[0] = slot[1] = slot[2] = sheet = 0;
     slotDiff[0] = slotDiff[1] = slotDiff[2] = 0;
+    dressup[0] = dressup[1] = dressup[2] = 0;
     editorCanvas.release();   // same GL lifetime contract / 同一 GL 生命周期契约
 }
 
 void PreviewTextures::sync(AppState& st) {
+    // The dress-up previews track their own revision (independent of the
+    // animation pipeline's). / 捏人预览有自己的版本号（与动画管线无关）。
+    if (dressupRevision != st.composeRevision) {
+        deleteTexture(dressup[0]);
+        deleteTexture(dressup[1]);
+        deleteTexture(dressup[2]);
+        dressup[0] = dressup[1] = dressup[2] = 0;
+        for (int v = 0; v < 3; ++v)
+            if (!st.composePreview[v].empty())
+                dressup[v] = matToTexture(st.composePreview[v]);
+        dressupRevision = st.composeRevision;
+    }
     if (uploadedRevision == st.revision) return;
     release();
     for (int v = 0; v < 3; ++v) {
@@ -393,6 +410,12 @@ void drawMainContent(AppState& st, PreviewTextures& tex) {
     if (ImGui::BeginTabItem("部件编辑器")) {
     st.mode = 1;
     drawPartEditor(st, tex);
+    ImGui::EndTabItem();
+    }
+
+    if (ImGui::BeginTabItem("捏人换装")) {
+    st.mode = 2;
+    drawDressUp(st, tex);
     ImGui::EndTabItem();
     }
     ImGui::EndTabBar();

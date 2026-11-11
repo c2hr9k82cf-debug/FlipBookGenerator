@@ -30,7 +30,7 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE_JSON = ROOT / "assets" / "templates" / "chibi_standard.json"
 ASSETS = ROOT / "assets"
-OUT_DIR = ROOT / "tests" / "fixtures" / "parts_library"
+OUT_DIR = ROOT / "assets" / "parts_library"
 
 SLOTS = ("hair", "face", "top", "pants", "boots", "body")
 Z_ORDER = {"hair": 40, "face": 30, "top": 20, "pants": 10, "boots": 10,

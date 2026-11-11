@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <filesystem>
 
 namespace fb {
 namespace ui {
@@ -283,6 +284,103 @@ void AppState::resetImport() {
         fb::applyAlign(importRaw, importAlign, editor.canvas);
     editor.touched[editor.view] = true;
     ++revision;
+}
+
+bool AppState::ensureLibrary() {
+    if (libraryReady) return true;
+    libraryError.clear();
+    if (!ensureTemplate()) return false;   // the template size IS the coords / 模板尺寸即坐标系
+
+    // Starter content first, then the user library — same (slot, name) is
+    // replaced, so user items override starter ones.
+    // 起步内容在前，用户库在后 —— 同（槽, 名）覆盖，用户物品胜过起步物品。
+    std::vector<std::string> roots;
+    const std::string starter = findStarterLibraryDir();
+    if (!starter.empty()) roots.push_back(starter);
+    const std::string user = userLibraryRoot();
+    std::error_code ec;
+    if (!user.empty() && std::filesystem::is_directory(user, ec))
+        roots.push_back(user);
+
+    bool any = false;
+    std::string lastErr;
+    for (const std::string& root : roots) {
+        fb::PartsLibrary tmp;
+        std::string err;
+        if (!fb::loadPartsLibrary(root, templateSpec.size, tmp, err)) {
+            // A broken user library must not take the starter one down.
+            // 用户库坏了不拖垮起步库。
+            lastErr = err;
+            continue;
+        }
+        for (const fb::LibraryItem& item : tmp.items) {
+            bool replaced = false;
+            for (fb::LibraryItem& old : library.items) {
+                if (old.slot == item.slot && old.name == item.name) {
+                    old = item;
+                    replaced = true;
+                    break;
+                }
+            }
+            if (!replaced) library.items.push_back(item);
+            any = true;
+        }
+    }
+    if (!any) {
+        libraryError = roots.empty()
+            ? "找不到部件库（起步库与用户库均无）。"
+            : "部件库加载失败：" + lastErr;
+        status = libraryError;
+        return false;
+    }
+
+    // Default recipe: the first item of every slot that has one.
+    // 默认配方：每个有货的槽取第一件。
+    if (recipe.items.empty()) {
+        recipe.templateName = templateSpec.name;
+        for (const std::string& slot : fb::librarySlotNames()) {
+            const auto items = library.inSlot(slot);
+            if (!items.empty()) recipe.items[slot] = items.front()->name;
+        }
+    }
+    libraryReady = true;
+    composeDirty = true;
+    return true;
+}
+
+void AppState::recomposePreview() {
+    if (!ensureLibrary()) return;
+    std::string err;
+    if (!fb::composeThreeViews(recipe, library, templateSpec, composePreview,
+                               err)) {
+        status = "合成失败：" + err;
+        return;
+    }
+    composeDirty = false;
+    ++composeRevision;
+}
+
+bool AppState::applyComposeToViews() {
+    if (!ensureLibrary()) return false;
+    cv::Mat out[3];
+    std::string err;
+    if (!fb::composeThreeViews(recipe, library, templateSpec, out, err)) {
+        status = "合成失败：" + err;
+        return false;
+    }
+    // The composed views are already in template coordinates — they enter
+    // views[] exactly like a dropped file would, alignment at identity.
+    // 合成视图本就在模板坐标里 —— 像拖入文件一样进入 views[]，对齐为恒等。
+    for (int v = 0; v < 3; ++v) {
+        views[v].clear();
+        views[v].image = out[v];
+        views[v].aligned = out[v].clone();
+        views[v].path = std::string("捏人合成（") +
+                        (v == FRONT ? "正面" : v == SIDE ? "侧面" : "背面") + "）";
+    }
+    runPipeline();
+    status += " —— 已从捏人合成生成，切「动画导出」tab 查看预览与导出。";
+    return hasResult;
 }
 
 int assignDrops(AppState& st, const std::vector<std::string>& paths) {

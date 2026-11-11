@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(FlipBookGenerator VERSION 0.10.1 LANGUAGES CXX)
+project(FlipBookGenerator VERSION 0.10.2 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -252,7 +252,7 @@ add_test(
 add_test(
     NAME compose
     COMMAND flipbook --compose-gate
-            --library ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/parts_library
+            --library ${CMAKE_CURRENT_SOURCE_DIR}/assets/parts_library
             --templates ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates
             --assets ${CMAKE_CURRENT_SOURCE_DIR}/assets
             --chips ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates/motion_chips
@@ -349,6 +349,7 @@ if(FLIPBOOK_BUILD_GUI)
         src/ui/main.cpp
         src/ui/panels.cpp
         src/ui/part_editor_panel.cpp
+        src/ui/dressup_panel.cpp
         src/ui/canvas.cpp
         src/ui/app_state.cpp
         src/ui/assets_locator.cpp

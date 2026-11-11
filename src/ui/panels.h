@@ -20,6 +20,11 @@ struct PreviewTextures {
     // The part editor's pixel canvas (v0.10.0) — same GL lifetime as above.
     // 部件编辑器的像素画布（v0.10.0）—— GL 生命周期同上。
     PixelCanvas editorCanvas;
+    // The dress-up tab's three composed previews (v0.10.2) — re-uploaded
+    // when AppState::composeRevision changes. / 捏人 tab 的三张合成预览
+    // （v0.10.2）—— AppState::composeRevision 变化时重传。
+    unsigned int dressup[3] = {0, 0, 0};
+    unsigned long dressupRevision = ~0ul;
 
     void sync(AppState& st);
     void release();

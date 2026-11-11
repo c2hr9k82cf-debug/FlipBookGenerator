@@ -28,5 +28,11 @@ std::string findTemplatePath();
 //   ~/Library/Application Support/FlipBookGenerator/parts_library/
 std::string userLibraryRoot();
 
+// The read-only STARTER library shipped with the app
+// (<assets>/parts_library), or "" when absent. Same search order as
+// findChipsDir. / 随应用发布的只读起步库（<assets>/parts_library），没有则 ""。
+// 搜索顺序与 findChipsDir 相同。
+std::string findStarterLibraryDir();
+
 }  // namespace ui
 }  // namespace fb

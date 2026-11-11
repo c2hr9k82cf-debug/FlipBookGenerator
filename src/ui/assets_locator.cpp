@@ -107,5 +107,26 @@ std::string userLibraryRoot() {
             "FlipBookGenerator" / "parts_library").string();
 }
 
+std::string findStarterLibraryDir() {
+    // <assets>/parts_library — ships inside the .app Resources, read-only
+    // starter content for the dress-up tab.
+    // <assets>/parts_library —— 随 .app Resources 发布，捏人 tab 的只读起步内容。
+    auto tryRoot = [](const fs::path& root, std::string& out) {
+        std::error_code ec;
+        const fs::path p = root / "parts_library";
+        if (fs::is_directory(p, ec)) { out = p.string(); return true; }
+        return false;
+    };
+    std::string found;
+    if (const char* env = std::getenv("FLIPBOOK_ASSETS"))
+        if (tryRoot(env, found)) return found;
+    const fs::path exe = executableDir();
+    if (tryRoot(exe / ".." / "Resources" / "assets", found)) return found;
+    if (tryRoot(exe / ".." / ".." / "assets", found)) return found;
+    if (tryRoot(exe / "assets", found)) return found;
+    if (tryRoot(fs::current_path() / "assets", found)) return found;
+    return "";
+}
+
 }  // namespace ui
 }  // namespace fb

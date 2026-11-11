@@ -8,8 +8,10 @@
 #pragma once
 
 #include "core/align.h"
+#include "core/compose.h"
 #include "core/core.h"
 #include "core/part_editor.h"
+#include "core/parts_library.h"
 #include "core/template_spec.h"
 
 #include <string>
@@ -120,6 +122,33 @@ public:
     // 微调暂存导入（缩放/偏移），重新贴到视图。
     void nudgeImport(int dScale, int dx, int dy);
     void resetImport();
+
+    // ---- dress-up / 捏人 (v0.10.2) ----
+    // The recipe ("who wears what") over the merged parts library (starter
+    // content + user library, user wins on name clash). composePreview holds
+    // the three composed 32x32 views shown in the dress-up tab; "生成动画"
+    // injects them into views[] — the same entry point as drag-and-drop, so
+    // the pipeline, preview and export need zero new code.
+    // 配方（"谁穿什么"）作用于合并部件库（起步库 + 用户库，重名用户库胜）。
+    // composePreview 是捏人 tab 显示的三张 32x32 合成视图；「生成动画」注入
+    // views[] —— 与拖图同一入口，管线、预览、导出零新代码。
+    fb::PartsLibrary library;
+    bool libraryReady = false;
+    std::string libraryError;
+    fb::ComposeRecipe recipe;
+    cv::Mat composePreview[3];
+    unsigned long composeRevision = 0;
+    bool composeDirty = true;
+
+    // Load starter + user library once (template size is the coordinate
+    // system). / 一次加载起步库 + 用户库（模板尺寸即坐标系）。
+    bool ensureLibrary();
+    // Compose into composePreview[3] (called when composeDirty). /
+    // 合成到 composePreview[3]（composeDirty 时调用）。
+    void recomposePreview();
+    // "生成动画": compose -> views[] -> runPipeline. / 「生成动画」：
+    // 合成 -> views[] -> 管线。
+    bool applyComposeToViews();
 };
 
 // Lowercased file name without directory (for front/side/back matching).

@@ -229,7 +229,7 @@ struct CliArgs {
     bool fillGate           = false;
 
     // Composer (v0.10.1) / 合成器（v0.10.1）
-    std::string library = "tests/fixtures/parts_library";
+    std::string library = "assets/parts_library";
     std::string recipe;
     bool compose     = false;
     bool composeGate = false;
