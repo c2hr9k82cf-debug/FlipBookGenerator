@@ -42,11 +42,13 @@ cmake --build build --target flipbook_gui -j4
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/assets" "$APP/Contents/Frameworks"
 cp build/flipbook_gui "$EXE_IN_APP"
-# Only the templates (chips + character templates) ship; the user's own views
-# are dragged in at runtime. findChipsDir() looks in ../Resources/assets.
-# 只捆模板（芯片 + 角色模板）；用户自己的视图运行时拖入。findChipsDir() 会找
-# ../Resources/assets。
+# Templates (chips + character templates) and the starter parts library ship;
+# the user's own views are dragged in at runtime. findChipsDir() /
+# findStarterLibraryDir() look in ../Resources/assets.
+# 捆模板（芯片 + 角色模板）与起步部件库；用户自己的视图运行时拖入。
+# findChipsDir() / findStarterLibraryDir() 会找 ../Resources/assets。
 cp -R assets/templates "$APP/Contents/Resources/assets/"
+cp -R assets/parts_library "$APP/Contents/Resources/assets/"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
