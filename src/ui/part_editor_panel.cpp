@@ -25,6 +25,8 @@
 #include <string>
 #include <vector>
 
+#include <opencv2/imgcodecs.hpp>
+
 namespace fs = std::filesystem;
 
 namespace fb {
@@ -32,7 +34,9 @@ namespace ui {
 namespace {
 
 const char* kSlotNames[6] = {"hair", "face", "top", "pants", "boots", "body"};
-const char* kSlotLabels[6] = {"发型", "脸", "上衣", "裤", "靴", "身体"};
+// v0.11.2 fix G: "body" is bare skin (exposed arms/thighs), not "the body".
+// v0.11.2 修复 G："body" 是裸露皮肤（手臂/大腿），不是"身体"。
+const char* kSlotLabels[6] = {"发型", "脸", "上衣", "裤", "靴", "皮肤"};
 const char* kViewLabels[3] = {"正面", "侧面", "背面"};
 
 enum Tool { TOOL_BRUSH = 0, TOOL_ERASER = 1, TOOL_FILL = 2, TOOL_PICK = 3 };
@@ -121,10 +125,48 @@ void drawPartEditor(AppState& st, PreviewTextures& tex) {
     if (ImGui::InputText("部件名", nameBuf, sizeof(nameBuf)))
         ed.itemName = nameBuf;
 
+    // Colour->slot rules (v0.11.2 fix G): what goes where. The collar band is
+    // the y8-12 strip at the bottom of the head region — a top that stops at
+    // y13 leaves the neck bare.
+    // 颜色->槽位规则（v0.11.2 修复 G）：什么画进哪个槽。领口带是头部区下沿 y8-12
+    // 一条 —— 上衣只画到 y13 会露脖子。
+    static const char* kSlotHelp[6] = {
+        "发型与发饰（头部带 y2-12 的蝴蝶结/发夹归这里，换上衣不会带走）",
+        "脸、五官与腮红",
+        "上衣与袖子；领口要画进领口带 y8-12，不然脖子露着",
+        "裤/裙（腿区上部；裸露大腿归「皮肤」）",
+        "靴（腿区的靴筒与靴子）",
+        "裸露皮肤 —— 手臂、大腿等没被衣服盖住的部分，不是躯干",
+    };
+    for (int i = 0; i < 6; ++i) {
+        if (ed.slot != kSlotNames[i]) continue;
+        ImGui::TextDisabled("槽位规则：%s", kSlotHelp[i]);
+        break;
+    }
+
     // ---- new / import ----
     // 新建 / 导入
     if (ImGui::Button("从空白新建")) {
-        ed.blank(cv::Size(32, 32));
+        // v0.11.2 fix F: shaped blank (white fill + outline) per slot/view —
+        // "fill and it becomes an item"; a plain empty canvas only when the
+        // template is missing. / v0.11.2 修复 F：按槽载入形状空白模板（白填充
+        // + 描边）——"涂色即成件"；模板缺失才退回纯空白。
+        ed.blank(templOk ? st.templateSpec.size : cv::Size(32, 32));
+        const char* viewNames[2] = {"front", "side"};
+        int loaded = 0;
+        for (int v = 0; v < 2; ++v) {
+            const std::string p = findBlankTemplate(ed.slot, viewNames[v]);
+            if (p.empty()) continue;
+            const cv::Mat img = cv::imread(p, cv::IMREAD_UNCHANGED);
+            if (img.empty() || img.size() != ed.canvas ||
+                img.type() != CV_8UC4)
+                continue;
+            ed.pixels[v] = img.clone();
+            ++loaded;
+        }
+        st.status = loaded
+                        ? "已从空白模板新建（白填充 + 描边）：直接涂色即成件。"
+                        : "已新建空白画布（没找到该槽形状模板，直接画也行）。";
         st.hasImport = false;
         ++st.revision;
     }

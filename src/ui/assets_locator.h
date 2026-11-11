@@ -34,5 +34,12 @@ std::string userLibraryRoot();
 // 搜索顺序与 findChipsDir 相同。
 std::string findStarterLibraryDir();
 
+// The shaped blank template for a slot/view (<assets>/parts/_blank/
+// <slot>_<view>.png — white fill + outline, "fill and it becomes an item"),
+// or "" when absent. Same search order as findChipsDir.
+// 某槽某视图的形状空白模板（<assets>/parts/_blank/<slot>_<view>.png —— 白填充
+// + 描边，"涂色即成件"），没有则 ""。搜索顺序与 findChipsDir 相同。
+std::string findBlankTemplate(const std::string& slot, const std::string& view);
+
 }  // namespace ui
 }  // namespace fb

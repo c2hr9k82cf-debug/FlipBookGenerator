@@ -82,6 +82,14 @@ struct PartsLibrary {
 // The six legal slots (PartLayer slots). / 六个合法槽位（PartLayer 槽位）。
 const std::vector<std::string>& librarySlotNames();
 
+// Default compositing order per slot (v0.11.2 fix A): body 5, pants/boots 10,
+// top 20, face 30, hair 40. Used when item.json omits "zOrder" — the old 0
+// default sank user-made items under everything (the "parts all wrong" bug).
+// 按槽缺省合成序（v0.11.2 修复 A）：body 5、pants/boots 10、top 20、face 30、
+// hair 40。item.json 没写 "zOrder" 时用它 —— 旧缺省 0 把用户自制部件垫到一切
+// 底下（"部位对应全错"的主因）。
+int defaultZOrderForSlot(const std::string& slot);
+
 // Load a whole library directory (slot folders → item folders). An invalid
 // item fails the whole load with a reason naming the offending folder —
 // a half-loaded library is worse than none.

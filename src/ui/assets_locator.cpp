@@ -43,6 +43,16 @@ bool tryTemplate(const fs::path& root, std::string& out) {
     return false;
 }
 
+// Shaped blank: <assets>/parts/_blank/<slot>_<view>.png. / 形状空白模板。
+bool tryBlank(const fs::path& root, const std::string& slot,
+              const std::string& view, std::string& out) {
+    std::error_code ec;
+    const fs::path p =
+        root / "parts" / "_blank" / (slot + "_" + view + ".png");
+    if (fs::is_regular_file(p, ec)) { out = p.string(); return true; }
+    return false;
+}
+
 fs::path executableDir() {
 #if defined(__APPLE__)
     char buf[4096];
@@ -96,6 +106,23 @@ std::string findTemplatePath() {
     if (tryTemplate(exe / ".." / ".." / "assets", found)) return found;
     if (tryTemplate(exe / "assets", found)) return found;
     if (tryTemplate(fs::current_path() / "assets", found)) return found;
+
+    return "";
+}
+
+std::string findBlankTemplate(const std::string& slot, const std::string& view) {
+    std::string found;
+
+    if (const char* env = std::getenv("FLIPBOOK_ASSETS")) {
+        if (tryBlank(env, slot, view, found)) return found;
+    }
+
+    const fs::path exe = executableDir();
+
+    if (tryBlank(exe / ".." / "Resources" / "assets", slot, view, found)) return found;
+    if (tryBlank(exe / ".." / ".." / "assets", slot, view, found)) return found;
+    if (tryBlank(exe / "assets", slot, view, found)) return found;
+    if (tryBlank(fs::current_path() / "assets", slot, view, found)) return found;
 
     return "";
 }

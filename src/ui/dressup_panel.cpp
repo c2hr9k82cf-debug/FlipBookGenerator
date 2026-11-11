@@ -8,7 +8,10 @@
 // 角色色布局，不是剪影。形状自由是 P5 的 spike，不在本期承诺。
 #include "dressup_panel.h"
 
+#include "texture.h"
+
 #include "imgui.h"
+#include "portable-file-dialogs.h"
 
 #include <array>
 #include <map>
@@ -19,8 +22,19 @@ namespace ui {
 namespace {
 
 const char* kSlotNames[6] = {"hair", "face", "top", "pants", "boots", "body"};
-const char* kSlotLabels[6] = {"发型", "脸", "上衣", "裤", "靴", "身体"};
+// v0.11.2 fix G: "body" is bare skin (exposed arms/thighs), not "the body" —
+// the old label sent users looking for a torso slot that does not exist.
+// v0.11.2 修复 G："body" 是裸露皮肤（手臂/大腿），不是"身体" —— 旧文案让人
+// 去找并不存在的躯干槽。
+const char* kSlotLabels[6] = {"发型", "脸", "上衣", "裤", "靴", "皮肤"};
 const char* kViewLabels[3] = {"正面", "侧面", "背面"};
+
+// Per-item thumbnail textures keyed by item dir (32x32, uploaded once).
+// 逐物品缩略图纹理，键为物品目录（32x32，只上传一次）。
+std::map<std::string, unsigned>& thumbCache() {
+    static std::map<std::string, unsigned> c;
+    return c;
+}
 
 // Per-role working colours for the recolour grid (RGB floats for ImGui),
 // initialised from the template palette. / 换色网格的逐角色工作色（ImGui 的
@@ -84,28 +98,46 @@ void drawDressUp(AppState& st, PreviewTextures& tex) {
     ImGui::Text("部件库：%d 件（起步库 + 用户库，重名用户库胜）",
                 (int)st.library.items.size());
 
-    // ---- slot pickers: one row per slot, item buttons ----
-    // 槽选择：每槽一行，物品按钮
+    // ---- slot pickers: one row per slot, thumbnail grid ----
+    // 槽选择：每槽一行，缩略图网格（v0.11.2：素材库可视化，文字按钮看不出
+    // 东西长什么样）
     for (int s = 0; s < 6; ++s) {
         const std::string slot = kSlotNames[s];
         ImGui::Spacing();
         ImGui::TextUnformatted(kSlotLabels[s]);
         ImGui::SameLine(70.f);
         const auto items = st.library.inSlot(slot);
+        auto& thumbs = thumbCache();
         for (size_t i = 0; i < items.size(); ++i) {
             if (i) ImGui::SameLine();
-            const bool sel = (st.recipe.items[slot] == items[i]->name);
-            if (sel) ImGui::PushStyleColor(ImGuiCol_Button,
-                                           ImVec4(0.24f, 0.52f, 0.88f, 1.f));
+            // find(), not operator[]: the subscript default-inserted an empty
+            // key into the recipe (v0.11.2 fix D).
+            // 用 find() 不用 operator[]：下标会往配方里塞一个空键（v0.11.2 修复 D）。
+            const auto selIt = st.recipe.items.find(slot);
+            const bool sel = (selIt != st.recipe.items.end() &&
+                              selIt->second == items[i]->name);
+            if (sel) {
+                ImGui::PushStyleColor(ImGuiCol_Button,
+                                      ImVec4(0.24f, 0.52f, 0.88f, 1.f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                                      ImVec4(0.34f, 0.62f, 0.98f, 1.f));
+            }
             ImGui::PushID(items[i]->name.c_str());
-            if (ImGui::Button(items[i]->name.c_str())) {
+            unsigned& tex = thumbs[items[i]->dir];
+            if (!tex && !items[i]->views[0].empty())
+                tex = matToTexture(items[i]->views[0]);
+            if (tex && ImGui::ImageButton("##thumb", (ImTextureID)(intptr_t)tex,
+                                          ImVec2(48, 48))) {
                 st.recipe.items[slot] = items[i]->name;
                 st.composeDirty = true;
             }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s", items[i]->name.c_str());
             ImGui::PopID();
-            if (sel) ImGui::PopStyleColor();
+            if (sel) ImGui::PopStyleColor(2);
         }
-        if (items.empty()) ImGui::TextDisabled("（该槽暂无物品）");
+        if (items.empty())
+            ImGui::TextDisabled("（暂无物品 —— 在部件编辑器做一件，点「保存到库」就出现在这）");
     }
 
     // ---- role recolour grid ----
@@ -137,6 +169,33 @@ void drawDressUp(AppState& st, PreviewTextures& tex) {
             st.composeDirty = true;
         }
     }
+
+    // ---- where new parts come from (v0.11.2: the import path must be visible
+    // in the dress-up tab itself, not hidden in another tab) ----
+    // 新部件从哪来（v0.11.2：入库入口必须就在捏人 tab 里看得见，不能藏在别的 tab）
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::TextUnformatted("素材入口");
+    if (ImGui::Button("导入素材图片...")) {
+        const std::vector<std::string> files = pfd::open_file(
+            "选择素材图片", ".",
+            {"图片文件", "*.png *.jpg *.jpeg *.bmp"}).result();
+        if (!files.empty()) {
+            if (st.editorImport(files[0]))
+                st.status = "已送入部件编辑器 —— 切「部件编辑器」tab 微调后"
+                            "点「保存到库」，再回来搭配。";
+        } else {
+            // Same B8 fallback message as the editor: pfd may silently fail.
+            // 与编辑器相同的 B8 兜底文案：pfd 可能静默失败。
+            st.status = "未选择文件。如果系统文件框没有弹出来，"
+                        "直接把 PNG 拖进窗口即可导入。";
+        }
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("或直接把 PNG 拖进本窗口");
+    ImGui::TextDisabled(
+        "绘制新部件在「部件编辑器」tab（无法从这里直接切过去）："
+        "画好点「保存到库」，本页缩略图立刻出现。");
 
     // ---- honest boundary + go ----
     // 诚实边界 + 开跑

@@ -15,18 +15,20 @@
 #
 # Slot assignment (region resolves same-colour roles — hair_highlight and gold
 # share RGB; roles are semantic, pixels are not):
-#   hair       hair_mid / hair_dark / hair_highlight
+#   hair       hair_mid / hair_dark / hair_highlight,
+#              head-row mint / red / gold (head-belt ornaments, fix C)
 #   face       head rows: skin / blush / white / teal
-#   top        mint / red / gold, body-row grey, non-head white
+#   top        non-head mint / red / gold, body-row grey, non-head white
 #   pants      pants / tan
 #   boots      grey_dark anywhere, leg-row grey
 #   body       body/leg rows: skin / blush
 #   outline    kept contour pixels join the slot their 8-neighbours vote for
 # 槽位划分（区域消歧同色角色 —— hair_highlight 与 gold 同 RGB；角色有语义，
 # 像素没有）：
-#   hair       hair_mid / hair_dark / hair_highlight
+#   hair       hair_mid / hair_dark / hair_highlight、
+#              头部行 mint / red / gold（头部带饰品，fix C）
 #   face       头部行：skin / blush / white / teal
-#   top        mint / red / gold、躯干行 grey、非头部 white
+#   top        非头部 mint / red / gold、躯干行 grey、非头部 white
 #   pants      pants / tan
 #   boots      任意行 grey_dark、腿部行 grey
 #   body       躯干/腿部行：skin / blush
@@ -98,7 +100,11 @@ def classify(role, region):
     if role in ("white", "teal"):
         return "face" if region == "head" else "top"
     if role in ("mint", "red", "gold"):
-        return "top"
+        # v0.11.2 fix C (kept in lockstep with make_parts_fixture.py): head-belt
+        # ornaments are hair, not clothing trim.
+        # v0.11.2 修复 C（与 make_parts_fixture.py 保持同步）：头部带饰品归发型，
+        # 不是衣服装饰。
+        return "hair" if region == "head" else "top"
     if role == "grey":
         return "boots" if region == "leg" else "top"
     if role == "grey_dark":

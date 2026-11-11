@@ -2194,6 +2194,48 @@ int runComposeGate(const CliArgs& a) {
         }
     }
 
+    // ---- 7. default zOrder: an item.json that omits "zOrder" gets the slot
+    //         table, not 0 (v0.11.2 fix A — a user-made item must not sink
+    //         under everything just because its JSON is minimal) ----
+    // ---- 7. 缺省 zOrder：item.json 不写 "zOrder" 时按槽查表，不是 0
+    //         （v0.11.2 修复 A —— 用户自制件绝不能因为 JSON 精简就垫到一切底下） ----
+    {
+        int bad = 0;
+        const int want[6] = {40, 30, 20, 10, 10, 5};
+        for (int i = 0; i < 6; ++i)
+            if (fb::defaultZOrderForSlot(slots[i]) != want[i]) ++bad;
+        if (fb::defaultZOrderForSlot("nonsense") != 0) ++bad;
+
+        const fs::path zroot =
+            fs::temp_directory_path() / "flipbook_zorder_gate";
+        std::error_code ec;
+        fs::remove_all(zroot, ec);
+        fs::create_directories(zroot / "hair" / "no_z", ec);
+        cv::Mat blank(32, 32, CV_8UC4, cv::Scalar(0, 0, 0, 0));
+        cv::imwrite((zroot / "hair" / "no_z" / "front.png").string(), blank);
+        cv::imwrite((zroot / "hair" / "no_z" / "side.png").string(), blank);
+        writeText(zroot / "hair" / "no_z" / "item.json",
+                  "{\n  \"name\": \"no_z\",\n  \"slot\": \"hair\",\n"
+                  "  \"back\": \"auto\",\n  \"silhouette\": \"template\"\n}");
+        fb::LibraryItem item;
+        std::string zerr;
+        if (!fb::loadLibraryItem((zroot / "hair" / "no_z").string(), "hair",
+                                 cv::Size(32, 32), item, zerr)) {
+            std::cout << "  default zOrder: load failed: " << zerr
+                      << "   FAIL\n";
+            ++bad;
+        } else if (item.zOrder != 40) {
+            std::cout << "  default zOrder: omitted zOrder got "
+                      << item.zOrder << ", want 40 (hair)   FAIL\n";
+            ++bad;
+        }
+        fs::remove_all(zroot, ec);
+        if (!bad)
+            std::cout << "  default zOrder: slot table + omitted-zOrder item "
+                         "both correct   OK\n";
+        failures += bad;
+    }
+
     std::cout << (failures ? "COMPOSE GATE FAIL\n" : "COMPOSE GATE OK\n");
     return failures ? 1 : 0;
 }

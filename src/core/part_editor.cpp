@@ -198,9 +198,14 @@ bool saveEditorItem(const PartEditor& ed, const std::string& libraryRoot,
         err = "无法写 " + (dir / "item.json").string();
         return false;
     }
+    // v0.11.2 fix A: write the slot's zOrder explicitly — the old save wrote
+    // none and the loader's 0 default sank user items under everything.
+    // v0.11.2 修复 A：显式写入槽位 zOrder —— 旧保存不写、加载缺省 0，把用户
+    // 部件垫到一切底下。
     f << "{\n"
       << "  \"name\": \"" << ed.itemName << "\",\n"
       << "  \"slot\": \"" << ed.slot << "\",\n"
+      << "  \"zOrder\": " << defaultZOrderForSlot(ed.slot) << ",\n"
       << "  \"back\": \"" << (hasBack ? "file" : "auto") << "\",\n"
       << "  \"silhouette\": \"template\"\n"
       << "}\n";

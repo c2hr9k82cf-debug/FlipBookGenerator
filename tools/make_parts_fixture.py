@@ -87,7 +87,13 @@ def classify(role, region):
     if role in ("white", "teal"):
         return "face" if region == "head" else "top"
     if role in ("mint", "red", "gold"):
-        return "top"
+        # v0.11.2 fix C: these three colours wear two hats — on the head belt
+        # they are hair decorations (a mint bow stays put when the top
+        # changes), elsewhere they are clothing trim. The old code sent them
+        # all to "top", which glued head ornaments onto the shirt.
+        # v0.11.2 修复 C：这三色戴两顶帽子 —— 头部带上是发饰（薄荷色蝴蝶结换
+        # 上衣时不该跟着走），其余是衣服装饰。旧代码全归 top，把头饰粘到了上衣上。
+        return "hair" if region == "head" else "top"
     if role == "grey":
         return "boots" if region == "leg" else "top"
     if role == "grey_dark":

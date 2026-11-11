@@ -19,6 +19,41 @@ parts_library/
 
 **槽位 / Slots**（固定六种 / exactly six）：`hair`、`face`、`top`、`pants`、`boots`、`body`。
 
+### 颜色-槽位规则 / Colour-to-slot rules
+
+模板内容分三带（`chibi_standard.json` 的 `part_map`）：头部 y2-12、躯干 y13-20、
+腿 y21-31。像素归哪个槽由**角色色 + 区域**共同决定 —— 同一个颜色在不同区域归属
+不同槽（v0.11.2 修复 C 修的正是这里）：
+
+| 槽 / Slot | 画什么 / What belongs | 备注 / Notes |
+|---|---|---|
+| `hair` | 发型、发饰 | 头部带的 mint/red/gold 饰品（蝴蝶结、发夹）归这里 —— 换上衣不该带走它们 |
+| `face` | 脸、五官、腮红 | 眼线行的裸露皮肤归这里 |
+| `top` | 上衣、袖子 | **领口要画进领口带 y8-12**（头部区下沿）—— 只画到 y13 会露脖子 |
+| `pants` | 裤 / 裙 | 腿区上部 |
+| `boots` | 靴 | 腿区的靴筒与靴子 |
+| `body` | **裸露皮肤** | 手臂、大腿等没被衣服盖住的部分，**不是躯干**（旧文案"身体"是误导） |
+
+另：`hair_highlight` 与 `gold` 同 RGB，按区域消歧 —— 头部带上是发饰高光，其余
+是金色装饰。
+
+/ The template content spans three bands (`part_map`): head y2-12, torso
+y13-20, legs y21-31. A pixel's slot is decided by its **role colour AND
+region** — the same colour can belong to different slots (this is what
+v0.11.2 fix C repairs):
+
+| Slot | What belongs | Notes |
+|---|---|---|
+| `hair` | hair, hair accessories | mint/red/gold decorations on the head belt (bows, clips) belong here — they must not move when the top changes |
+| `face` | face, eyes, blush | the bare-skin eye-level strip included |
+| `top` | shirt, sleeves | **paint the collar into the collar band y8-12** (bottom of the head region) — stopping at y13 leaves the neck bare |
+| `pants` | pants / skirt | upper legs |
+| `boots` | boots | boot shafts in the leg band |
+| `body` | **bare skin** | exposed arms/thighs, **not** the torso ("body" was a misnomer) |
+
+Also: `hair_highlight` and `gold` share the same RGB and are disambiguated by
+region — hair-shine on the head belt, gold trim elsewhere.
+
 ## 精灵图片 / Sprite PNGs
 
 | 规则 / Rule | 值 / Value |
@@ -62,7 +97,7 @@ parts_library/
 |---|---|---|
 | `name` | 否（缺省=目录名）/ no (default = dir name) | 物品名 / item name |
 | `slot` | 否（但必须与父目录一致）/ no (must match folder) | 槽位；与目录不符即报错 / slot; mismatch with the folder is an error |
-| `zOrder` | 否（缺省 0）/ no (default 0) | 合成序，大在上 / compositing order, higher on top |
+| `zOrder` | 否（缺省按槽查表：hair 40 / face 30 / top 20 / pants 10 / boots 10 / body 5）/ no (slot default: hair 40 / face 30 / top 20 / pants 10 / boots 10 / body 5) | 合成序，大在上；省略即用缺省表（v0.11.2 修复 A，不再缺省 0 垫底）/ compositing order, higher on top; omitted = the slot table (v0.11.2 fix A — no longer defaults to 0 at the bottom) |
 | `anchors` | 否 / no | 逐视图锚点 `[x,y]`；缺省用模板默认 / per-view anchor `[x,y]`; template default otherwise |
 | `roleColors` | 否 / no | 本物品的角色换色，见下 / role recolours for this item, see below |
 | `back` | 否（缺省 `"auto"`）/ no (default `"auto"`) | `"auto"` = 剪影推断；`"file"` = 用 back.png / `"auto"` = silhouette inference; `"file"` = use back.png |

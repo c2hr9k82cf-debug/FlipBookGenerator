@@ -412,11 +412,15 @@ bool AppState::applyComposeToViews() {
 int assignDrops(AppState& st, const std::vector<std::string>& paths) {
     int assigned = 0;
     for (const std::string& p : paths) {
-        // Editor tab: drops go to the part editor's views (same front/side/
-        // back name matching), not to the animation slots.
-        // 编辑器 tab：拖入进部件编辑器的视图（同样按 front/side/back 匹配），
-        // 不进动画槽。
-        if (st.mode == 1) {
+        // Editor AND dress-up tabs: drops go to the part editor's views (same
+        // front/side/back name matching), not to the animation slots — the
+        // "AI image -> editor -> library" path (v0.11.2 fix E). The old
+        // dress-up behaviour fed the animation slots, which is never what a
+        // dress-up drop means.
+        // 编辑器与捏人 tab：拖入进部件编辑器的视图（同样按 front/side/back 匹配），
+        // 不进动画槽 —— 即"AI 图 -> 编辑器 -> 库"路径（v0.11.2 修复 E）。旧的捏人
+        // 行为塞进动画槽，换装语境下从来不是这个意思。
+        if (st.mode == 1 || st.mode == 2) {
             const std::string name = baseNameLower(p);
             if (name.find("side") != std::string::npos)
                 st.editor.setView(fb::PartEditor::SIDE);
@@ -424,7 +428,12 @@ int assignDrops(AppState& st, const std::vector<std::string>& paths) {
                 st.editor.setView(fb::PartEditor::BACK);
             else if (name.find("front") != std::string::npos)
                 st.editor.setView(fb::PartEditor::FRONT);
-            if (st.editorImport(p)) ++assigned;
+            if (st.editorImport(p)) {
+                ++assigned;
+                if (st.mode == 2)
+                    st.status = "已送入部件编辑器 —— 切「部件编辑器」tab 微调后"
+                                "保存入库，再回来搭配。";
+            }
             continue;
         }
         const std::string name = baseNameLower(p);

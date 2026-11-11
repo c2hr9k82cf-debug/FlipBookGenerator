@@ -92,6 +92,19 @@ const std::vector<std::string>& librarySlotNames() {
     return kSlots;
 }
 
+int defaultZOrderForSlot(const std::string& slot) {
+    // Matches the shipped reference items (v0.11.2 fix A). Unknown slot gets
+    // 0 on purpose — better invisible than wrongly on top.
+    // 与随附参考物品一致（v0.11.2 修复 A）。未知槽位故意给 0 —— 宁可看不见，
+    // 不可错在顶上。
+    if (slot == "hair") return 40;
+    if (slot == "face") return 30;
+    if (slot == "top") return 20;
+    if (slot == "pants" || slot == "boots") return 10;
+    if (slot == "body") return 5;
+    return 0;
+}
+
 const LibraryItem* PartsLibrary::find(const std::string& slot,
                                       const std::string& name) const {
     for (const auto& it : items)
@@ -144,6 +157,11 @@ bool loadLibraryItem(const std::string& itemDir, const std::string& slot,
         }
     }
 
+    // v0.11.2 fix A: default by SLOT, not 0 — a user-made hairdo used to sink
+    // under the face/body layers and look like "the parts are all wrong".
+    // v0.11.2 修复 A：缺省按槽位，不是 0 —— 用户自制发型以前沉到脸/身体图层
+    // 底下，看起来像"部位对应全错"。
+    out.zOrder = defaultZOrderForSlot(slot);
     if (meta.has("zOrder")) {
         const JsonValue& z = *meta.find("zOrder");
         if (z.type != JsonValue::Int) {
