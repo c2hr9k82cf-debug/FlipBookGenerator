@@ -4,7 +4,11 @@
 #include "core.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <map>
+#include <utility>
+#include <vector>
 
 namespace fb {
 namespace {
@@ -84,18 +88,59 @@ Pose Animation::poseAt(int frame) const {
 
 namespace {
 
-// Lift a limb by SHORTENING it from the far end. The part's pivot must be its
-// joint, so the joint stays pinned to its neighbour while the far end rises.
-// This is the only limb motion that cannot open a gap at the joint — see the
-// detach rule spelled out in makeIdle.
-// 把肢体从远端【缩短】来抬起它。部件的 pivot 必须是它的关节，于是关节钉在相邻
-// 部件上不动、远端抬起。这是唯一不会在关节开缝的肢体动作 —— 见 makeIdle 里的
-// 脱节铁律。
-float liftScale(const Rig& rig, int partId, float pixels, const PresetParams& sp) {
-    const int h = rig.bbox[partId - 1].height;
-    if (h <= 0) return 1.f;
-    const float s = 1.f - (pixels * sp.motionScale) / static_cast<float>(h);
-    return (s < 0.05f) ? 0.05f : s;
+// The pants' two main tones, counted straight off the leg sprites. The spec
+// (ANIMATION_SPEC §5) fixes the pants at exactly two similar-hue,
+// different-lightness tones, so counting the two most frequent leg colours —
+// skipping the outline, which is the darkest opaque colour — finds them with
+// no per-pixel art. Returns false unless two clear tones remain.
+// 裤子的两种主色，直接从腿精灵上数出来。规范（ANIMATION_SPEC §5）把裤子定为
+// 恰好两种色相相近、明度不同的主色，所以数腿上最常见的两种颜色（跳过描边，
+// 即最暗的不透明色）即可，无需逐像素手绘。数不出两种清晰主色则返回 false。
+bool detectPantsTones(const Rig& rig, cv::Vec4b& dark, cv::Vec4b& light) {
+    std::map<std::array<int, 4>, int> freq;
+    for (int pid : {PART_LEG_LEFT, PART_LEG_RIGHT}) {
+        const cv::Mat& spr = rig.parts[pid - 1];
+        for (int y = 0; y < spr.rows; ++y)
+            for (int x = 0; x < spr.cols; ++x) {
+                const cv::Vec4b p = spr.at<cv::Vec4b>(y, x);
+                if (p[3] == 0) continue;
+                ++freq[{p[0], p[1], p[2], p[3]}];
+            }
+    }
+    if (freq.size() < 3) return false;   // outline + at least two tones / 描边 + 至少两主色
+
+    std::vector<std::pair<std::array<int, 4>, int>> v(freq.begin(), freq.end());
+    std::sort(v.begin(), v.end(),
+              [](const auto& x, const auto& y) { return x.second > y.second; });
+
+    auto lum = [](const std::array<int, 4>& c) { return c[0] + c[1] + c[2]; };
+    size_t darkest = 0;
+    for (size_t i = 1; i < v.size(); ++i)
+        if (lum(v[i].first) < lum(v[darkest].first)) darkest = i;
+
+    std::array<int, 4> t[2];
+    int got = 0;
+    for (size_t i = 0; i < v.size() && got < 2; ++i) {
+        if (i == darkest) continue;
+        t[got++] = v[i].first;
+    }
+    if (got < 2) return false;
+
+    if (lum(t[0]) > lum(t[1])) std::swap(t[0], t[1]);
+    dark  = cv::Vec4b(t[0][0], t[0][1], t[0][2], t[0][3]);
+    light = cv::Vec4b(t[1][0], t[1][1], t[1][2], t[1][3]);
+    return true;
+}
+
+// Per-frame pants-tone trade. Group 0 keeps the leg tones as drawn; group 1
+// trades dark and light (ANIMATION_SPEC §5). Two swaps that are each other's
+// inverse = the two tones swap places; leg shapes stay untouched.
+// 逐帧裤色互换。组 0 保留腿的原色；组 1 交换深浅（ANIMATION_SPEC §5）。
+// 两条互为反向的换色 = 两色互换位置；腿形完全不动。
+void applyToneSwap(Pose& p, const cv::Vec4b& dark, const cv::Vec4b& light, int group) {
+    if (group == 0) return;
+    p.swaps.push_back({dark, light});
+    p.swaps.push_back({light, dark});
 }
 
 // Wrap a set of keyframe poses evenly around the cycle.
@@ -148,7 +193,6 @@ bool tooSmallForRotation(const Rig& rig) {
 // 这里的 1 像素步进是安全的，尽管 CLAUDE.md 反对 1 像素幅度。那条规定是为了防止
 // 取整把【插值出来的】中间帧压平；本预设每帧一个关键帧，从不插值，每一步都落在
 // 真实帧上、精确光栅化。
-constexpr float kBobIdle[2]    = {0.f, 1.f};
 constexpr float kBobSide[6]    = {0.f, 1.f, 0.f, 0.f, 1.f, 0.f};
 constexpr float kBobFrontal[6] = {0.f, 1.f, 0.f, 1.f, 2.f, 1.f};
 
@@ -165,6 +209,21 @@ constexpr float kBobFrontal[6] = {0.f, 1.f, 0.f, 1.f, 2.f, 1.f};
 // 槽 1/4 双腿着地 —— 并用 walk_side 交叉核对，它底部行的 x 宽度恰好在同样槽位变宽。
 constexpr float kSwingWalk[6]  = {+1.f, 0.f, -1.f, -1.f, 0.f, +1.f};
 
+// Which frames share a pants-tone arrangement (anim_reference.json
+// tone_swap_groups). 0 = the legs' own tones, 1 = the two tones traded.
+// 哪些帧共用一种裤色排布（anim_reference.json 的 tone_swap_groups）。
+// 0 = 腿的原色，1 = 两色互换。
+constexpr int kToneFront[6] = {0, 0, 1, 1, 1, 0};   // [[0,1,5],[2,3,4]]
+constexpr int kToneSide[6]  = {0, 0, 0, 1, 0, 0};   // [[0,1,2,4,5],[3]]
+constexpr int kToneUp[6]    = {0, 0, 1, 1, 0, 0};   // [[0,1,4,5],[2,3]]
+
+// Which frames hide the far arm (ANIMATION_SPEC §6): the torso occludes it on
+// 4 of 6 walk_side frames — measured, arm_right is ~9px on these slots vs 19px
+// on the two it shows. 1 = hide.
+// 哪几帧隐藏远端手臂（ANIMATION_SPEC §6）：躯干在侧走 6 帧里的 4 帧挡住它 ——
+// 实测 arm_right 在这些槽位约 9px，在显示的两帧 19px。1 = 隐藏。
+constexpr int kHideFarArmSide[6] = {1, 1, 0, 0, 1, 1};
+
 // Which of the cycle's `slots` the i-th of n frames uses. The reference fixes
 // each cycle at 2 slots (idle) or 6 (walk); a different frame count resamples
 // those slots — exact at the reference counts, nearest otherwise.
@@ -176,7 +235,6 @@ int slotOf(int i, int n, int slots) { return (i * slots) / n; }
 }  // namespace
 
 Animation makeIdle(const Rig& rig, int frameCount, const PresetParams& sp) {
-    (void)rig;
     Animation a;
     a.name = "idle";
     a.frameCount = std::max(2, frameCount);
@@ -207,37 +265,22 @@ Animation makeIdle(const Rig& rig, int frameCount, const PresetParams& sp) {
     //                  / 从远端缩短，关节钉住
     //
     // Per-part moveX / moveY is safe only when every neighbour moves by exactly
-    // the same amount, which is easy to get wrong and invisible until rendered.
-    // The presets therefore never use it.
-    // 部件级的 moveX / moveY 只有在所有相邻部件位移【完全相同】时才安全，
-    // 这一点极易写错，而且要渲染出来才看得见。所以预设里根本不用它。
+    // the same amount. The idle stretch is exactly that case: the torso grows
+    // one row at the TOP (its bottom stays pinned at the hip), and the head and
+    // arms ride up by the SAME moveY, so the neck and shoulder joints stay
+    // glued. That is why moveY appears here and nowhere else.
+    // 部件级的 moveX / moveY 只有在所有相邻部件位移【完全相同】时才安全。待机伸展
+    // 正是这种情况：躯干在【顶部】长高一行（底部钉在胯部），头与臂以【同样的】
+    // moveY 上抬，脖子与肩关节全部粘牢。所以 moveY 只在这里出现，别处不用。
     //
-    // Hence breathing is a whole-character bob plus a small shoulder roll. No
-    // scaleY for the chest here: a 2% squash is under a third of a pixel at
-    // 32x32 — invisible — and with the torso pivot at the shoulders it would
-    // pull the torso up off the legs. scaleY stays in the data model for the
-    // keyframe editor, where the user places the pivot themselves.
-    // 所以呼吸 = 整体起伏 + 轻微转肩。这里不给胸腔用 scaleY：2% 的压缩在 32x32
-    // 下不到三分之一个像素，看不见；而躯干 pivot 在肩，会把躯干从腿上拽上去。
-    // scaleY 留在数据模型里给关键帧编辑器用，那时 pivot 由用户自己放。
-    //
-    // Amplitude and direction come from the reference sheet's measured
-    // body_offset_y, not from a guessed "readable" value: idle bobs 1px DOWN
-    // on the exhale (kBobIdle = {0, 1}), where this preset used to bob 2px UP.
-    // One keyframe per frame, so the 1px step rasterises exactly — see the note
-    // on kBobIdle.
-    // 幅度与方向取自参考图实测的 body_offset_y，不是猜一个"看得清"的值：
-    // 待机在呼气时向下起伏 1 像素（kBobIdle = {0, 1}），而本预设过去是向上抬 2 像素。
-    // 每帧一个关键帧，所以 1 像素的步进能精确光栅化 —— 见 kBobIdle 的说明。
-    //
-    // No shoulder roll. Tried it, and at 8deg it read as the character
-    // shrugging, not breathing — worse, nearest-neighbour rotation cost the
-    // arms 8 of their 64 pixels (12%) in a single frame. A hand-drawn idle
-    // (see the reference sheet) moves the whole upper body by a fraction of a
-    // pixel; the closest honest equivalent here is the whole-character bob.
-    // 不转肩。试过：8 度读起来是"耸肩"而不是呼吸，更糟的是最近邻旋转让手臂在
-    // 单帧里丢了 64 个像素中的 8 个（12%）。手绘待机（见参考图）只是把整个上身
-    // 挪动不到一个像素；这里最接近的诚实等价物就是整体起伏。
+    // The breath is therefore a STRETCH, not a whole-character bob: a uniform
+    // bob would move the legs too, but the reference keeps the legs + boots
+    // pixel-still and only raises the upper body (ANIMATION_SPEC §9). A shoulder
+    // roll was tried and rejected: at 8deg it read as shrugging, and
+    // nearest-neighbour rotation cost the arms 12% of their pixels in a frame.
+    // 所以呼吸是【伸展】，不是整体起伏：整体起伏会连腿一起抬，而参考图让腿+靴
+    // 逐像素不动、只抬上身（ANIMATION_SPEC §9）。转肩试过又否掉：8 度读起来像耸肩，
+    // 而且最近邻旋转让手臂单帧丢 12% 像素。
     // -----------------------------------------------------------------------
 
     // The reference gives idle exactly 2 frames (rows 0/2/4 hold 2 cells
@@ -245,9 +288,37 @@ Animation makeIdle(const Rig& rig, int frameCount, const PresetParams& sp) {
     // never lerps the 1px step into a flat line.
     // 参考图给 idle 正好 2 帧（row 0/2/4 各 2 格）—— 一次呼吸一个循环。
     // 每帧一个关键帧，好让 poseAt() 不会把 1 像素的步进插成一条平线。
+    //
+    // The breath is a STRETCH, not a whole-character bob: the legs stay
+    // planted and the upper body grows one row taller (ANIMATION_SPEC §9).
+    // Measured: legs + boots are pixel-identical between the two frames; only
+    // the upper body rises one row on the stretch frame.
+    // 呼吸是【伸展】，不是整体起伏：腿钉住不动，上身长高一行（ANIMATION_SPEC §9）。
+    // 实测：两帧的腿+靴逐像素相同；只有上身在伸展帧抬高一行。
+    //
+    // Mechanism (ANIMATION_SPEC §11.4): the torso scales scaleY=(h+rows)/h
+    // about its shoulder pivot with a compensating moveY so its BOTTOM stays
+    // pinned at the hip (DETACH). This repeats one row at the top = a
+    // colour-sampled extra row. The head and arms follow the risen shoulder
+    // with the same moveY, so every joint stays glued. Legs untouched.
+    // 机制（ANIMATION_SPEC §11.4）：躯干绕肩部 pivot 做 scaleY=(h+rows)/h，
+    // 并用 moveY 补偿，让【底部】钉在胯部（脱节铁律）。这会在顶部重复一行 =
+    // 取色得到的额外行。头与臂以同样的 moveY 跟随抬起的肩，关节全部粘牢。腿不动。
+    const cv::Rect& bodyBox = rig.bbox[PART_BODY - 1];
+    const float h    = (float)std::max(1, bodyBox.height);
+    const float rows = std::max(0.f, sp.breathScale);   // stretch rows; ref = 1
     std::vector<Pose> poses(static_cast<size_t>(a.frameCount));
     for (int i = 0; i < a.frameCount; ++i) {
-        poses[i].rootY = kBobIdle[slotOf(i, a.frameCount, 2)] * sp.breathScale;
+        Pose& p = poses[i];
+        // slot 0 = stretch, slot 1 = rest. The rest frame is byte-identical to
+        // the source; the stretch frame is the transformed one.
+        // 槽 0 = 伸展，槽 1 = 放松。放松帧与源图逐字节相同；伸展帧才是变换的。
+        if (slotOf(i, a.frameCount, 2) == 1) continue;
+        p.parts[PART_BODY - 1].scaleY     = (h + rows) / h;
+        p.parts[PART_BODY - 1].moveY      = -rows;
+        p.parts[PART_HEAD - 1].moveY      = -rows;
+        p.parts[PART_ARM_LEFT - 1].moveY  = -rows;
+        p.parts[PART_ARM_RIGHT - 1].moveY = -rows;
     }
 
     spreadKeyframes(a, poses);
@@ -299,6 +370,9 @@ Animation makeWalkSide(const Rig& rig, int frameCount, const PresetParams& sp) {
     // frames 2 and 5 and turned a 6-frame cycle into a 4-frame one.
     // 每帧一个关键帧：参考图的节奏是跨步保持两帧、交叉一帧切过，四个关键帧铺在
     // 六帧上表达不了 —— 那样会把第 2、5 帧变成插值，把 6 帧的循环压成 4 帧的。
+    cv::Vec4b dark, light;
+    const bool haveTones = detectPantsTones(rig, dark, light);
+
     std::vector<Pose> poses(static_cast<size_t>(a.frameCount));
 
     for (int i = 0; i < a.frameCount; ++i) {
@@ -313,7 +387,12 @@ Animation makeWalkSide(const Rig& rig, int frameCount, const PresetParams& sp) {
         p.parts[PART_ARM_LEFT - 1].rotateDeg  = -arm * w;
         p.parts[PART_ARM_RIGHT - 1].rotateDeg = +arm * w;
 
+        // The far arm is occluded by the torso on 4 of 6 frames — hide it.
+        // 远端手臂在 6 帧里的 4 帧被躯干挡住 —— 隐藏它。
+        p.hidden[PART_ARM_RIGHT - 1] = (kHideFarArmSide[s] != 0);
+
         p.rootY = kBobSide[s] * sp.bobScale;
+        if (haveTones) applyToneSwap(p, dark, light, kToneSide[s]);
     }
 
     spreadKeyframes(a, poses);
@@ -339,62 +418,37 @@ static Animation makeWalkFrontal(const Rig& rig, int frameCount,
     a.fps = 10;
     a.loop = true;
 
-    // Lift the foot by ~2px and the hand by ~1.5px however long the limbs
-    // are, so a 16x16 rig lifts as visibly as a 32x32 one. Amplitudes are in
-    // pixels because that is the unit the rasteriser can actually resolve —
-    // a smaller lift silently rounds away on the in-between frames.
-    // Measured from reference: stepping boot bottom y31 vs planted boot bottom
-    // y28-y29 = ~2px lift (anim_reference.json walk_front frame_data).
-    // 不论肢体多长，把脚抬起约 2 像素、手约 1.5 像素，这样 16x16 和 32x32
-    // 抬起的可见度一致。幅度以像素为单位，因为那是光栅化器唯一能分辨的单位
-    // —— 更小的抬起在中间帧会被静默取整掉。
-    // 参考图测量：迈步靴底 y31 vs 站立靴底 y28-y29 = 约 2px 抬起
-    // （anim_reference.json walk_front frame_data）。
-    const float legLift = 2.0f;
-    const float armLift = 1.5f;
+    // Legs stay STRAIGHT and the arms are copied VERBATIM (ANIMATION_SPEC §4):
+    // the leg band is pure tone-swap, no per-frame limb geometry. Detect the
+    // two pants tones off the legs; `facingAway` only picks the tone group.
+    cv::Vec4b dark, light;
+    const bool haveTones = detectPantsTones(rig, dark, light);
+    const int* toneGroup = facingAway ? kToneUp : kToneFront;
 
     // The bob is kBobFrontal verbatim — 0/1/2px, sinking into the footfalls.
-    // See the note above kBobIdle: the old 2px upward bob was the wrong
+    // See the note above the kBob tables: the old 2px upward bob was the wrong
     // direction at twice the amplitude.
-    // 起伏照搬 kBobFrontal —— 0/1/2 像素，沉进落脚。见 kBobIdle 上方的说明：
+    // 起伏照搬 kBobFrontal —— 0/1/2 像素，沉进落脚。见 kBob 表上方的说明：
     // 旧的 2 像素上抬方向错、幅度翻倍。
     //
     // One keyframe per frame, for the same reason as walk_side: the reference
     // holds each stride for two frames and cuts the pass for one.
     // 每帧一个关键帧，理由同 walk_side：参考图每个跨步保持两帧、交叉切一帧。
     //
-    // `facingAway` FLIPS THE SWING SIGN for the back view. Turning the
-    // character around mirrors which screen side a given leg lands on: the
-    // leg lifted at slot 0 reads on our left when we see their face and on our
-    // right when we see their back. Measured off anim_reference.json —
-    // walk_front's boot bottoms differ left-minus-right by [+2,0,-2,-2,0,+1]
-    // and walk_up's by [-2,0,+1,+1,0,-1], an almost exact mirror. Sharing one
-    // sign between the two walks had walk_up lifting the wrong screen leg.
-    // `facingAway` 为背面视图【翻转摆动符号】。角色转身后，同一条腿落到屏幕上的
-    // 左右侧会互换：槽 0 抬起的那条腿，看到脸时在我们左边、看到后脑时在我们右边。
-    // 由 anim_reference.json 实测 —— walk_front 的靴底左右差是
-    // [+2,0,-2,-2,0,+1]，walk_up 的是 [-2,0,+1,+1,0,-1]，几乎精确镜像。
-    // 两个走路共用一个符号，会让 walk_up 抬错屏幕上的那条腿。
+    // `facingAway` now only SELECTS THE TONE GROUP (front vs back trade the
+    // two pants tones on different frames) — the legs no longer swing, so
+    // there is no swing sign to flip. The back-view tone phase differs from
+    // the front's (anim_reference.json tone_swap_groups).
+    // `facingAway` 现在只【选择换色组】（正/背在不同帧互换两裤色）—— 腿不再摆，
+    // 没有摆动符号可翻。背面的换色相位与正面不同（anim_reference.json
+    // tone_swap_groups）。
     std::vector<Pose> poses(static_cast<size_t>(a.frameCount));
-    const float flip = facingAway ? -1.f : +1.f;
-
     for (int i = 0; i < a.frameCount; ++i) {
-        const int   s = slotOf(i, a.frameCount, 6);
-        const float w = kSwingWalk[s] * flip;
+        const int s = slotOf(i, a.frameCount, 6);
         Pose& p = poses[i];
 
-        // The swinging leg and the opposite arm lift toward the camera; the
-        // pass frames leave both feet on the ground. Limbs are contralateral.
-        // 摆动腿与对侧手臂抬向镜头；交叉帧双脚着地。四肢是交叉的。
-        if (w != 0.f) {
-            const int   legId = (w > 0.f) ? PART_LEG_LEFT  : PART_LEG_RIGHT;
-            const int   armId = (w > 0.f) ? PART_ARM_RIGHT : PART_ARM_LEFT;
-            const float m     = (w > 0.f) ? w : -w;
-            p.parts[legId - 1].scaleY = liftScale(rig, legId, legLift * m, sp);
-            p.parts[armId - 1].scaleY = liftScale(rig, armId, armLift * m, sp);
-        }
-
         p.rootY = kBobFrontal[s] * sp.bobScale;
+        if (haveTones) applyToneSwap(p, dark, light, toneGroup[s]);
     }
 
     spreadKeyframes(a, poses);

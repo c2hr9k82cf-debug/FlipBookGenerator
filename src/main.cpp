@@ -46,14 +46,14 @@ void printCliUsage() {
         "      渲染全部预设。Phase 1 的人工验收关口。\n"
         "\n"
         "  flipbook --idle-purity [--bundle DIR]\n"
-        "      The pinch/tear gate. Every idle frame must be an EXACT\n"
-        "      translation of the source: a uniform bob moves every part by the\n"
-        "      same amount and cannot pull anything apart, so a pixel the seam\n"
-        "      repair changed there is a defect — an over-fill that redrew the\n"
-        "      artist's notch, or a tear it should have caught.\n"
-        "      撕裂闸门。每一帧待机都必须是源图的【精确】平移：整体起伏让所有部件\n"
-        "      位移相同，撕不开任何东西，所以补缝在那里改动的像素就是缺陷 ——\n"
-        "      要么是多补把画师的缺口重画了，要么是漏补了本该修的撕裂。\n"
+        "      The idle-invariant gate. The idle is a STRETCH (legs planted,\n"
+        "      torso grows, head/arms rise). Checks: one frame is byte-identical\n"
+        "      to the source (seam repair is a no-op on the rest pose), the leg\n"
+        "      region never moves, and no frame splits into more blobs than the\n"
+        "      source (no detach).\n"
+        "      待机不变量闸门。待机是【伸展】（腿钉住、躯干加长、头/臂抬起）。检查：\n"
+        "      有一帧与源图逐字节相同（补缝在放松姿势下恒等）、腿部区域从不动、\n"
+        "      没有帧比源图裂成更多连通块（不脱节）。\n"
         "\n"
         "  flipbook --help\n"
         "\n"
@@ -202,28 +202,86 @@ bool isTranslationOf(const cv::Mat& frame, const cv::Mat& src, int dx, int dy) {
     return true;
 }
 
-// The pinch/tear gate / 撕裂闸门.
+// Are two images byte-identical within rows [y0, y1)? Transparent pixels match
+// each other regardless of RGB — the same rule as isTranslationOf and the recon
+// comparison (a fully transparent pixel's colour carries no information).
+// 两张图在行 [y0, y1) 内是否逐字节相同？透明像素互认不论 RGB —— 规则同
+// isTranslationOf 与重建比对（全透明像素的颜色不携带信息）。
+bool regionIdentical(const cv::Mat& a, const cv::Mat& b, int y0, int y1) {
+    for (int y = y0; y < y1; ++y) {
+        const cv::Vec4b* pa = a.ptr<cv::Vec4b>(y);
+        const cv::Vec4b* pb = b.ptr<cv::Vec4b>(y);
+        for (int x = 0; x < a.cols; ++x) {
+            if (pa[x][3] == 0 && pb[x][3] == 0) continue;
+            if (pa[x] != pb[x]) return false;
+        }
+    }
+    return true;
+}
+
+// Count 4-connected components of non-transparent pixels. The DETACH gate: a
+// part that pulls away from its neighbour splits the silhouette into two blobs,
+// which is exactly the artifact the detach rule forbids. Compared against the
+// source's own count so a source that legitimately reads as two blobs does not
+// spuriously fail — the motion must not CREATE a new split.
+// 统计非透明像素的 4 连通分量。脱节闸门：部件从相邻部件拽开时，剪影会断成两个
+// 连通块 —— 正是脱节铁律禁止的瑕疵。与源图自身的数量比对，这样源图本来就该是
+// 两块时不会误报 —— 要求的是【动作不得制造新的断裂】。
+int blobCount(const cv::Mat& img) {
+    const int H = img.rows, W = img.cols;
+    cv::Mat seen(H, W, CV_8U, cv::Scalar(0));
+    static const int dx[4] = {1, -1, 0, 0};
+    static const int dy[4] = {0, 0, 1, -1};
+    int blobs = 0;
+    for (int y = 0; y < H; ++y) {
+        for (int x = 0; x < W; ++x) {
+            if (img.at<cv::Vec4b>(y, x)[3] == 0) continue;
+            if (seen.at<uchar>(y, x)) continue;
+            ++blobs;
+            std::vector<cv::Point> stack;
+            stack.push_back(cv::Point(x, y));
+            seen.at<uchar>(y, x) = 1;
+            while (!stack.empty()) {
+                const cv::Point p = stack.back();
+                stack.pop_back();
+                for (int k = 0; k < 4; ++k) {
+                    const int nx = p.x + dx[k], ny = p.y + dy[k];
+                    if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+                    if (seen.at<uchar>(ny, nx)) continue;
+                    if (img.at<cv::Vec4b>(ny, nx)[3] == 0) continue;
+                    seen.at<uchar>(ny, nx) = 1;
+                    stack.push_back(cv::Point(nx, ny));
+                }
+            }
+        }
+    }
+    return blobs;
+}
+
+// The idle-invariant gate / 待机不变量闸门.
 //
-// fillJointPinches() must be a NO-OP whenever the frame is a pure translation
-// of the source. A uniform bob moves every part by the same amount and cannot
-// pull anything apart, so any pixel the repair changed there is a defect in
-// one of two directions: an over-fill that redrew a notch the artist drew, or
-// a tear it should have repaired and did not. Both were measured on this
-// project before this gate existed — see the fillJointPinches() comment.
+// The idle is a STRETCH (ANIMATION_SPEC §9), not a whole-character bob: the
+// rest frame is the source untouched, and the stretch frame grows the torso
+// one row and raises the head + arms while the LEGS stay planted. This gate
+// checks exactly those invariants without trusting the preset:
+//   (1) at least one frame is byte-identical to the source — the seam repair
+//       is a no-op on the rest pose, which is what catches an over-fill (a
+//       notch the artist drew, redrawn) or an under-fill (a tear left open);
+//   (2) the leg region never moves — the user's "the legs do not move";
+//   (3) no frame splits into more blobs than the source — motion must not
+//       pull a part away from its neighbour (the detach rule).
+// 待机是【伸展】（ANIMATION_SPEC §9），不是整体起伏：放松帧 = 源图原样，伸展帧把
+// 躯干加长一行、头与臂抬高，而【腿】钉住不动。本闸门正好查这三条不变量，且不信任
+// 预设：
+//   (1) 至少一帧与源图逐字节相同 —— 补缝在放松姿势下是恒等操作，这正是抓多补
+//       （把画师画的缺口重画）与漏补（撕裂没修）的地方；
+//   (2) 腿部区域从不移动 —— 用户要的"腿不动"；
+//   (3) 没有任何帧比源图裂成更多连通块 —— 动作不得把部件从相邻部件拽开（脱节铁律）。
 //
-// makeIdle is exactly such a motion (rootY only, no per-part transform), so
-// every idle frame has to BE the source moved, and this checks it without
-// trusting the preset: the translation is searched for, not read out of the
-// keyframes, so a preset that started rotating parts would fail here too.
-//
-// fillJointPinches() 在画面是源图的纯平移时【必须】是恒等操作。整体起伏让所有
-// 部件位移相同，撕不开任何东西，所以它在那里改动的任何像素都是缺陷，而且是两个
-// 方向之一：多补，把画师画的缺口重画了；或者漏补，该修的撕裂没修。两种都在本项目
-// 里实测到过 —— 见 fillJointPinches() 的注释。
-//
-// makeIdle 正是这样的动作（只有 rootY，无逐部件变换），所以每帧待机【就是】移动过
-// 的源图；本函数不信任预设地验这一点：平移量是【搜】出来的，不是从关键帧读的，
-// 所以预设哪天开始转部件，这里也会红。
+// Each check is read from the rendered frames, not out of the keyframes, so a
+// preset that started moving the legs or detaching a part fails here too.
+// 每项检查都从【渲染出的帧】读取，不从关键帧读，所以预设哪天开始挪腿或拽开部件，
+// 这里也会红。
 int runIdlePurity(const CliArgs& a) {
     fb::Rig rig;
     std::string err;
@@ -238,43 +296,49 @@ int runIdlePurity(const CliArgs& a) {
               << " (" << rig.size.width << "x" << rig.size.height << ")\n"
               << "Idle:   " << frames.size() << " frames @ " << anim.fps << "fps\n\n";
 
-    // The bob is a few pixels at most; ±16 covers it with room to spare and is
-    // still cheap. Widen only if a preset ever bobs harder than that.
-    // 起伏最多几像素；±16 绰绰有余且代价很低。除非将来有预设起伏得更厉害，否则不扩。
-    constexpr int kRadius = 16;
+    // The planted region = the leg bboxes' union (legs + boots). It must stay
+    // byte-identical across the breath — the legs do not move.
+    // 钉住区域 = 两条腿 bbox 的并集（腿+靴）。呼吸全程必须逐字节不变 —— 腿不动。
+    const cv::Rect legRegion =
+        rig.bbox[fb::PART_LEG_LEFT - 1] | rig.bbox[fb::PART_LEG_RIGHT - 1];
+    const int legY0 = legRegion.y;
+    const int legY1 = legRegion.y + legRegion.height;
+    const int srcBlobs = blobCount(rig.source);
 
     int failures = 0;
+    bool sawIdentity = false;
     for (size_t i = 0; i < frames.size(); ++i) {
-        bool matched = false;
-        int fdx = 0, fdy = 0;
-        for (int dy = -kRadius; dy <= kRadius && !matched; ++dy) {
-            for (int dx = -kRadius; dx <= kRadius && !matched; ++dx) {
-                if (isTranslationOf(frames[i], rig.source, dx, dy)) {
-                    matched = true;
-                    fdx = dx;
-                    fdy = dy;
-                }
-            }
+        bool ok = true;
+        if (isTranslationOf(frames[i], rig.source, 0, 0)) sawIdentity = true;
+
+        if (!regionIdentical(frames[i], rig.source, legY0, legY1)) {
+            std::cout << "  frame " << i << ": leg region MOVED   FAIL\n";
+            ok = false;
         }
-        if (matched) {
-            std::cout << "  frame " << i << ": source translated by ("
-                      << fdx << ", " << fdy << ")   OK\n";
-        } else {
-            std::cout << "  frame " << i << ": NOT a translation of the source   FAIL\n";
-            ++failures;
+        const int blobs = blobCount(frames[i]);
+        if (blobs != srcBlobs) {
+            std::cout << "  frame " << i << ": " << blobs << " blobs vs source "
+                      << srcBlobs << " (detach)   FAIL\n";
+            ok = false;
         }
+        if (ok) std::cout << "  frame " << i << ": OK\n";
+        else ++failures;
+    }
+    if (!sawIdentity) {
+        std::cout << "  no rest frame is byte-identical to the source   FAIL\n";
+        ++failures;
     }
 
     if (failures) {
-        std::cout << "\nRESULT: FAIL — " << failures << " idle frame(s) changed pixels.\n"
-                  << "        The seam repair is not a no-op under a pure bob: it is\n"
-                  << "        either redrawing art or missing a tear.\n"
-                  << "结果：失败 —— " << failures << " 帧待机改动了像素。补缝在纯起伏下不是\n"
-                  << "        恒等操作：要么重画了原画，要么漏补了撕裂。\n";
+        std::cout << "\nRESULT: FAIL — " << failures << " idle invariant(s) broken.\n"
+                  << "        Keep the legs planted, the body in one piece, and a\n"
+                  << "        clean rest pose (the seam repair must not touch it).\n"
+                  << "结果：失败 —— " << failures << " 条待机不变量被破坏。\n"
+                  << "        保持腿钉住、身子不散、放松姿势干净（补缝不得改动它）。\n";
         return 1;
     }
-    std::cout << "\nRESULT: PASS — every idle frame is the source translated, untouched.\n"
-              << "结果：通过 —— 每帧待机都是源图的平移，未被改动。\n";
+    std::cout << "\nRESULT: PASS — legs planted, no detach, clean rest pose.\n"
+              << "结果：通过 —— 腿钉住、不脱节、放松姿势干净。\n";
     return 0;
 }
 
