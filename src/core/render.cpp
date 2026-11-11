@@ -422,25 +422,7 @@ void fillJointPinches(cv::Mat& frame, const cv::Mat& owner, const cv::Mat& sourc
     }
 }
 
-// One palette-swap pass: replace each `from` colour with its `to`. Exact BGRA
-// match — pixel art has no blending, so a pixel is either the tone or it is not.
-// Drives the pants two-tone trade (ANIMATION_SPEC §5); leg shapes stay put.
-// 一次调色板换色：把每个 `from` 色替换成 `to`。精确 BGRA 匹配 —— 像素风无混合，
-// 像素要么是该色、要么不是。驱动裤子两主色互换（ANIMATION_SPEC §5）；腿形不动。
-void applySwaps(cv::Mat& frame,
-                const std::vector<std::pair<cv::Vec4b, cv::Vec4b>>& swaps) {
-    if (swaps.empty()) return;
-    for (int y = 0; y < frame.rows; ++y) {
-        cv::Vec4b* row = frame.ptr<cv::Vec4b>(y);
-        for (int x = 0; x < frame.cols; ++x) {
-            for (const auto& sw : swaps) {
-                if (row[x] == sw.first) { row[x] = sw.second; break; }
-            }
-        }
-    }
-}
-
-}  // namespace
+}//  namespace
 
 cv::Mat composeFrame(const Rig& rig, const Pose& pose) {
     cv::Mat frame = cv::Mat::zeros(rig.size.height, rig.size.width, CV_8UC4);
@@ -468,7 +450,7 @@ cv::Mat composeFrame(const Rig& rig, const Pose& pose) {
     // already-swapped colours rather than a stale tone.
     // 逐帧调色板换色（裤子两主色互换）。在此应用 —— 光栅化后、缝修补【前】，
     // 让修补出的像素继承换过的颜色，而不是旧色。
-    applySwaps(frame, pose.swaps);
+    applyPaletteMap(frame, pose.swaps);
     fillInteriorHoles(frame, owner);                  // enclosed seams / 封闭缝
     // Tears are judged against the source in ITS OWN frame, so undo the pose's
     // global translation before looking a pixel up. Rounds the same way the

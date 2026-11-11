@@ -18,8 +18,11 @@
 #include "extractor.h"
 
 #include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
+#include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -55,6 +58,21 @@ void printCliUsage() {
         "      有一帧与源图逐字节相同（补缝在放松姿势下恒等）、腿部区域从不动、\n"
         "      没有帧比源图裂成更多连通块（不脱节）。\n"
         "\n"
+        "  flipbook --chip-recon [--chips DIR] [--sheet PNG]\n"
+        "      Tier B fidelity gate: every hand-drawn chip must equal its\n"
+        "      reference-sheet cell pixel-for-pixel. Verbatim copy, no error.\n"
+        "      Tier B 保真闸门：每个手绘芯片必须与参考格逐像素相同。照搬，零误差。\n"
+        "\n"
+        "  flipbook --chip-reskin --chips DIR --map palette_map.txt\n"
+        "      Tier B reskin gate: a reskin changes ONLY colour — the shape\n"
+        "      (alpha mask) is identical and every colour is a map destination.\n"
+        "      Tier B 换皮闸门：换皮只改颜色 —— 形状（alpha 掩码）不变，且每个色\n"
+        "      都是映射的目标色。\n"
+        "\n"
+        "  flipbook --chip-render [--chips DIR] [--map palette_map.txt] [--out DIR]\n"
+        "      Render every flipbook from the chips. Empty map = original.\n"
+        "      从芯片渲染全部翻页书。空映射 = 原版。\n"
+        "\n"
         "  flipbook --help\n"
         "\n"
         "Without arguments, the interactive menu opens.\n"
@@ -69,6 +87,14 @@ struct CliArgs {
     bool reconTest = false;
     bool allPresets = false;
     bool idlePurity = false;
+
+    // Tier B chip gates / Tier B 芯片闸门
+    std::string chips = "assets/templates/motion_chips";
+    std::string map;         // palette_map.txt; empty = identity / 空 = 恒等
+    std::string sheet;       // reference sheet override / 参考图覆盖
+    bool chipRecon  = false;
+    bool chipReskin = false;
+    bool chipRender = false;
 };
 
 bool parseArgs(int argc, char** argv, CliArgs& a, std::string& err) {
@@ -96,6 +122,21 @@ bool parseArgs(int argc, char** argv, CliArgs& a, std::string& err) {
         } else if (s == "--bundle") {
             const char* v = needValue("--bundle"); if (!v) return false;
             a.bundle = v;
+        } else if (s == "--chip-recon") {
+            a.chipRecon = true;
+        } else if (s == "--chip-reskin") {
+            a.chipReskin = true;
+        } else if (s == "--chip-render") {
+            a.chipRender = true;
+        } else if (s == "--chips") {
+            const char* v = needValue("--chips"); if (!v) return false;
+            a.chips = v;
+        } else if (s == "--map") {
+            const char* v = needValue("--map"); if (!v) return false;
+            a.map = v;
+        } else if (s == "--sheet") {
+            const char* v = needValue("--sheet"); if (!v) return false;
+            a.sheet = v;
         } else if (s == "--help" || s == "-h") {
             err = "help";
             return false;
@@ -342,6 +383,155 @@ int runIdlePurity(const CliArgs& a) {
     return 0;
 }
 
+// Compare two same-size images pixel-for-pixel. Two fully transparent pixels
+// match regardless of RGB (a transparent pixel's colour carries no information).
+// 同尺寸两图逐像素比对。两个全透明像素不论 RGB 都算相同（透明像素颜色无信息）。
+bool imagesIdentical(const cv::Mat& a, const cv::Mat& b) {
+    if (a.size() != b.size()) return false;
+    for (int y = 0; y < a.rows; ++y) {
+        const cv::Vec4b* pa = a.ptr<cv::Vec4b>(y);
+        const cv::Vec4b* pb = b.ptr<cv::Vec4b>(y);
+        for (int x = 0; x < a.cols; ++x) {
+            if (pa[x][3] == 0 && pb[x][3] == 0) continue;
+            if (pa[x] != pb[x]) return false;
+        }
+    }
+    return true;
+}
+
+// Pack a BGRA colour into a sortable key for set membership tests.
+// 把 BGRA 颜色打包成可排序的键，用于集合成员测试。
+uint32_t colourKey(const cv::Vec4b& c) {
+    return (uint32_t)c[0] | ((uint32_t)c[1] << 8) |
+           ((uint32_t)c[2] << 16) | ((uint32_t)c[3] << 24);
+}
+
+// Tier B fidelity gate: every loaded chip must equal its reference-sheet cell
+// pixel-for-pixel. The chips are crops of the sheet by construction, so any
+// diff is a load/decode/cell-mapping fault — this gate catches it.
+// Tier B 保真闸门：每个加载的芯片必须与参考格逐像素相同。芯片本就是参考格的裁剪，
+// 故任何差异都是读取/解码/格映射故障 —— 本闸门负责揪出。
+int runChipRecon(const CliArgs& a) {
+    fb::ChipSet cs;
+    std::string err;
+    if (!fb::loadChipSet(a.chips, cs, err)) { std::cerr << "FAIL: " << err << "\n"; return 1; }
+    const std::string sheetPath = a.sheet.empty() ? cs.sourcePath : a.sheet;
+    cv::Mat sheet = cv::imread(sheetPath, cv::IMREAD_UNCHANGED);
+    if (sheet.empty()) { std::cerr << "FAIL: cannot load reference sheet " << sheetPath << "\n"; return 1; }
+    if (sheet.channels() == 3) cv::cvtColor(sheet, sheet, cv::COLOR_BGR2BGRA);
+
+    std::cout << "Chips: " << a.chips << "\nSheet: " << sheetPath
+              << " (" << sheet.cols << "x" << sheet.rows << ")\n\n";
+
+    int failures = 0, checked = 0;
+    for (const fb::MotionChips& m : cs.flipbooks) {
+        for (int i = 0; i < m.frameCount; ++i) {
+            const cv::Rect cell(i * cs.cell.width, m.sheetRow * cs.cell.height,
+                                cs.cell.width, cs.cell.height);
+            if (m.sheetRow < 0 || cell.x + cell.width > sheet.cols ||
+                cell.y + cell.height > sheet.rows) {
+                std::cout << "  " << m.name << " f" << i << ": cell outside sheet   FAIL\n";
+                ++failures; continue;
+            }
+            ++checked;
+            if (!imagesIdentical(m.frames[i], sheet(cell))) {
+                std::cout << "  " << m.name << " f" << i << ": chip != reference cell   FAIL\n";
+                ++failures;
+            }
+        }
+    }
+    if (failures) {
+        std::cout << "\nRESULT: FAIL — " << failures << " chip(s) differ from the reference.\n"
+                  << "结果：失败 —— " << failures << " 个芯片与参考格不符。\n";
+        return 1;
+    }
+    std::cout << "\nRESULT: PASS — all " << checked << " chips match the reference sheet.\n"
+              << "结果：通过 —— 全部 " << checked << " 个芯片与参考图逐格一致。\n";
+    return 0;
+}
+
+// Tier B reskin gate: a reskin must change ONLY colour — the transparency mask
+// and the opaque-pixel count stay identical (shape invariant), and every
+// resulting colour must be a palette-map destination (no leaked original tone).
+// Tier B 换皮闸门：换皮只能改颜色 —— 透明掩码与非透明像素数保持不变（形状不变），
+// 且每个结果色都必须是调色板映射的目标色（不得漏出原色）。
+int runChipReskin(const CliArgs& a) {
+    fb::ChipSet cs;
+    std::string err;
+    if (!fb::loadChipSet(a.chips, cs, err)) { std::cerr << "FAIL: " << err << "\n"; return 1; }
+    fb::PaletteMap map;
+    if (!fb::loadPaletteMap(a.map, map, err)) { std::cerr << "FAIL: " << err << "\n"; return 1; }
+
+    std::set<uint32_t> allowed;
+    for (const auto& sw : map) allowed.insert(colourKey(sw.second));
+
+    std::cout << "Chips: " << a.chips << "\nMap:   " << a.map
+              << " (" << map.size() << " entries)\n\n";
+
+    int failures = 0, checked = 0;
+    for (const fb::MotionChips& m : cs.flipbooks) {
+        const std::vector<cv::Mat> orig = fb::renderFromChips(m, {});
+        const std::vector<cv::Mat> alt  = fb::renderFromChips(m, map);
+        for (int i = 0; i < m.frameCount; ++i) {
+            ++checked;
+            const cv::Mat& o = orig[i];
+            const cv::Mat& r = alt[i];
+            bool shapeOK = true, colourOK = true;
+            for (int y = 0; y < o.rows; ++y) {
+                const cv::Vec4b* po = o.ptr<cv::Vec4b>(y);
+                const cv::Vec4b* pr = r.ptr<cv::Vec4b>(y);
+                for (int x = 0; x < o.cols; ++x) {
+                    const bool ao = po[x][3] != 0, ar = pr[x][3] != 0;
+                    if (ao != ar) shapeOK = false;
+                    if (ar && !allowed.count(colourKey(pr[x]))) colourOK = false;
+                }
+            }
+            if (!shapeOK) {
+                std::cout << "  " << m.name << " f" << i << ": alpha mask changed   FAIL\n";
+                ++failures;
+            } else if (!colourOK) {
+                std::cout << "  " << m.name << " f" << i << ": leaked original colour   FAIL\n";
+                ++failures;
+            }
+        }
+    }
+    if (failures) {
+        std::cout << "\nRESULT: FAIL — " << failures << " frame(s) break the reskin contract.\n"
+                  << "结果：失败 —— " << failures << " 帧破坏了换皮契约。\n";
+        return 1;
+    }
+    std::cout << "\nRESULT: PASS — all " << checked << " frames change colour only.\n"
+              << "结果：通过 —— 全部 " << checked << " 帧只换色不换形。\n";
+    return 0;
+}
+
+// Render every flipbook with a palette map (empty map = identity / original).
+// 用调色板映射渲染全部翻页书（空映射 = 恒等 / 原版）。
+int runChipRender(const CliArgs& a) {
+    fb::ChipSet cs;
+    std::string err;
+    if (!fb::loadChipSet(a.chips, cs, err)) { std::cerr << "FAIL: " << err << "\n"; return 1; }
+    fb::PaletteMap map;
+    if (!a.map.empty() && !fb::loadPaletteMap(a.map, map, err)) {
+        std::cerr << "FAIL: " << err << "\n"; return 1;
+    }
+    std::cout << "Chips: " << a.chips
+              << (a.map.empty() ? "  (identity palette / 恒等调色板)" : "  map: " + a.map) << "\n";
+
+    int failures = 0;
+    for (const fb::MotionChips& m : cs.flipbooks) {
+        const std::vector<cv::Mat> frames = fb::renderFromChips(m, map);
+        std::string sheetPath;
+        if (!fb::exportAnimation(frames, a.out, m.name, err, &sheetPath)) {
+            std::cerr << "  FAIL: " << m.name << ": " << err << "\n"; ++failures; continue;
+        }
+        std::cout << "  " << m.name << ": " << frames.size() << " frames @ "
+                  << m.fps << "fps -> " << sheetPath << "\n";
+    }
+    std::cout << "\nOutput: " << a.out << "/\n";
+    return failures ? 1 : 0;
+}
+
 int runCli(int argc, char** argv) {
     CliArgs a;
     std::string err;
@@ -354,6 +544,9 @@ int runCli(int argc, char** argv) {
 
     if (a.reconTest)   return runReconTest(a);
     if (a.idlePurity)  return runIdlePurity(a);
+    if (a.chipRecon)   return runChipRecon(a);
+    if (a.chipReskin)  return runChipReskin(a);
+    if (a.chipRender)  return runChipRender(a);
     if (a.allPresets)  return runPresets(a, {"idle", "walk_side", "walk_front", "walk_up"});
     if (!a.preset.empty()) return runPresets(a, {a.preset});
 

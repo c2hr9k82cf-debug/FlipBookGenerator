@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(FlipBookGenerator VERSION 0.7.0 LANGUAGES CXX)
+project(FlipBookGenerator VERSION 0.7.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -34,6 +34,7 @@ add_library(flipbook_core STATIC
     src/core/render.cpp
     src/core/export.cpp
     src/core/parts.cpp
+    src/core/motion.cpp
 )
 target_link_libraries(flipbook_core ${OpenCV_LIBS})
 
@@ -100,3 +101,23 @@ foreach(char character_32 character_alt)
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
 endforeach()
+
+# Tier B chip gates (template-level, character-independent). Fidelity proves the
+# chips are a verbatim copy of the reference sheet; reskin proves a reskin only
+# swaps colour. The chip template is shared by every character, so each gate
+# runs once.
+# Tier B 芯片闸门（模板级，与角色无关）。保真证明芯片是参考图的照搬；换皮证明换皮
+# 只换色。芯片模板为所有角色共享，故各跑一次。
+add_test(
+    NAME chip_recon
+    COMMAND flipbook --chip-recon --chips
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates/motion_chips
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+add_test(
+    NAME chip_reskin
+    COMMAND flipbook --chip-reskin --chips
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates/motion_chips
+            --map ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates/motion_chips/palette_map.txt
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)

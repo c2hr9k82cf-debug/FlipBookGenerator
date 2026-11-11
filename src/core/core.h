@@ -109,17 +109,66 @@ struct Pose {
     std::vector<std::pair<cv::Vec4b, cv::Vec4b>> swaps;
 };
 
-// Reserved slot for hand-drawn per-frame chips (Tier B). Hip (y18-22) and boots
-// (y26-31) are hand-redrawn per frame on the reference sheet; rules approximate
-// them now, and a chip here can replace that slot's rule approximation later.
-// 为逐帧手绘芯片（Tier B）预留的槽位。参考图里髋部（y18-22）和靴（y26-31）逐帧
-// 手绘；本轮用规则近似，日后此芯片可替换该槽位的规则近似。
-struct VariantChip {
-    enum class Slot { Hip, Boot };
-    Slot             slot   = Slot::Hip;    // which region / 哪个区域
-    int              bindTo = PART_BODY;    // part id it rides on / 跟随的部件 id
-    std::vector<cv::Mat> frames;            // one BGRA chip per frame / 每帧一张 BGRA 芯片
+// ---------------------------------------------------------------------------
+// Tier B: per-frame hand-drawn chip playback / Tier B 逐帧手绘芯片回放
+// ---------------------------------------------------------------------------
+// Verbatim per-frame sprites cropped from the reference sheet. Each frame is a
+// FULL-SIZE BGRA chip — the artist's hand-drawn position, the bob, the two-tone
+// leg swap, the side-view far-arm on f2/f3 are all baked into the pixels.
+// Playback is a plain overwrite (no transform), so it is pixel-exact by
+// construction. Reskin is a pure palette swap. This is the CLAUDE.md "Tier B
+// (chip playback)" path, kept independent of the Tier A rig/PartTransform
+// pipeline so a procedural preset and a chip flipbook never interfere.
+// 从参考图逐帧裁出的手绘精灵。每帧是整幅 BGRA 芯片 —— 画师画的位置、起伏、
+// 两棕换色、侧视 f2/f3 远臂全烘在像素里。回放是直接覆盖（无变换），构造上逐像素
+// 精确。换皮是纯调色板替换。此即 CLAUDE.md「Tier B（芯片回放）」通道，与 Tier A
+// 的 rig/PartTransform 管线彼此独立，程序化预设与芯片翻页书互不干扰。
+
+// One flipbook's per-frame chips (e.g. "front_walk", 6 frames @ 10fps). Each
+// entry of `frames` is a full-cell BGRA sprite. `sheetRow` records the source
+// row in the reference sheet so a fidelity gate can look the cell back up.
+// 一本翻页书的逐帧芯片（如 "front_walk"，6 帧 @ 10fps）。frames 每项是整格
+// BGRA 精灵。sheetRow 记下参考图里的源行，供保真闸门回查该格。
+struct MotionChips {
+    std::string name;
+    int  frameCount = 0;
+    int  fps        = 0;
+    int  sheetRow   = -1;
+    std::vector<cv::Mat> frames;   // [frameCount] CV_8UC4, each cell-sized
 };
+
+// A whole chip bundle: every flipbook in one motion_chips/ directory.
+// 一整套芯片包：一个 motion_chips/ 目录里的全部翻页书。
+struct ChipSet {
+    std::string sourcePath;        // reference sheet, for reporting / 参考图，便于报错
+    cv::Size cell{0, 0};           // 32x32 / 每格尺寸
+    std::vector<MotionChips> flipbooks;
+    const MotionChips* find(const std::string& name) const;
+};
+
+// Palette map (exact BGRA pairs) for reskinning a chip verbatim. An identity map
+// keeps the original colours; an empty map is a no-op.
+// 换皮调色板映射（精确 BGRA 对），逐帧照搬地换色。恒等映射保原色；空映射不动。
+using PaletteMap = std::vector<std::pair<cv::Vec4b, cv::Vec4b>>;
+
+// Apply a palette map in place. Exact BGRA match — pixel art has no blending, so
+// a pixel is either the tone or it is not. Shared by the Tier A seam path and
+// the Tier B reskin.
+// 就地应用调色板映射。精确 BGRA 匹配 —— 像素风无混合，像素要么是该色要么不是。
+// Tier A 的补缝与 Tier B 的换皮共用它。
+void applyPaletteMap(cv::Mat& img, const PaletteMap& map);
+
+// Load a chip bundle from a motion_chips/ directory (index.txt + chips/*.png).
+// 从 motion_chips/ 目录读取芯片包（index.txt + chips/*.png）。
+bool loadChipSet(const std::string& dir, ChipSet& out, std::string& err);
+
+// Load a palette map from palette_map.txt ("sB,sG,sR,sA dB,dG,dR,dA" per line).
+// 从 palette_map.txt 读取换皮映射（每行一对 BGRA）。
+bool loadPaletteMap(const std::string& path, PaletteMap& out, std::string& err);
+
+// Render one flipbook's frames with a palette map applied (identity = verbatim).
+// 用调色板映射渲染一本翻页书的各帧（恒等 = 照搬）。
+std::vector<cv::Mat> renderFromChips(const MotionChips& chips, const PaletteMap& map);
 
 struct Keyframe {
     int  frame = 0;
