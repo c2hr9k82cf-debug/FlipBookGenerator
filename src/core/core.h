@@ -235,11 +235,16 @@ cv::Mat renderDiffOverlay(const cv::Mat& userAligned,
 //
 // tolerant=true downgrades SILHOUETTE mismatch to a warning (stats->maskDiffPixels
 // counts it; mismatching pixels are simply skipped, and the output shape always
-// comes from the chips anyway). Function violations still fail — those make the
-// reskin ambiguous. The GUI offers this as "warn, don't reject"; gates stay strict.
+// comes from the chips anyway) AND repairs function conflicts by majority
+// mapping (v0.11.0): the majority user colour wins, minority pixels land in
+// stats->colourConflictMask and are repainted as the majority. Strict still
+// fails on both. The GUI offers this as "warn and repair, don't reject"; the
+// gates assert both behaviours (see --palette-gate / --palette-tolerant-gate).
 // tolerant=true 把**剪影**不一致降级为警告（stats->maskDiffPixels 计数；差异像素
-// 直接跳过 —— 反正输出形状永远来自芯片）。函数性冲突仍然失败 —— 那会让换皮有歧义。
-// GUI 用它实现"提醒而不拒绝"；闸门保持严格。
+// 直接跳过 —— 反正输出形状永远来自芯片），**并且**按多数派映射修复函数性冲突
+// （v0.11.0）：多数派用户色胜出，少数派像素进 stats->colourConflictMask 并按主色
+// 重绘。严格模式对两者都失败。GUI 用它实现"提醒并修复，不拒绝"；闸门断言两种
+// 行为（见 --palette-gate / --palette-tolerant-gate）。
 bool extractPaletteMap(const cv::Mat& userImg, const cv::Mat& refCell,
                        PaletteMap& out, std::string& err,
                        ExtractStats* stats = nullptr, bool tolerant = false);

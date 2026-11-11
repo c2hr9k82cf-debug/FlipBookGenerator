@@ -150,6 +150,14 @@ add_test(
 # 四方向大图闸门（app 管线）。配色提取对合成视图精确往返并保持严格（换皮角色图
 # 是负向夹具）；大图闸门检查布局/补帧/镜像/掩码/覆盖。模板级，跑一次。
 add_test(
+    NAME palette_tolerant
+    COMMAND flipbook --palette-tolerant-gate --chips
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates/motion_chips
+            --kit ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/test_kit
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+add_test(
     NAME palette_extract
     COMMAND flipbook --palette-gate --chips
             ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates/motion_chips

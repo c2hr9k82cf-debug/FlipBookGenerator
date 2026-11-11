@@ -17,6 +17,7 @@
 #include "core/backinfer.h"
 #include "core/compose.h"
 #include "core/core.h"
+#include "core/json_min.h"
 #include "core/part_editor.h"
 #include "core/parts.h"
 #include "core/parts_library.h"
@@ -93,6 +94,13 @@ void printCliUsage() {
         "      配色提取闸门。正向：每视图合成用户图（对 idle f0 应用映射），提取回来\n"
         "      必须精确往返。负向：单像素第三色必须被拒绝；给了 --front/--side/--back\n"
         "      时它们也必须被拒绝（换皮角色图就是它的夹具）。\n"
+        "\n"
+        "  flipbook --palette-tolerant-gate [--chips DIR] [--kit DIR]\n"
+        "      The test kit's anti-aliased input: strict must REFUSE the function\n"
+        "      conflict, tolerant must repair by majority and count the minority\n"
+        "      pixels exactly as expected.json records them.\n"
+        "      测试素材包的抗锯齿输入：严格必须拒函数性冲突；宽容必须按多数派修复，\n"
+        "      且少数派像素计数与 expected.json 记录精确一致。\n"
         "\n"
         "  flipbook --fourdir-gate [--chips DIR] [--map palette_map.txt]\n"
         "      Four-direction sheet gate: 8x6 layout, idle cycle-fill (f0 f1 f0\n"
@@ -212,6 +220,9 @@ struct CliArgs {
     // Four-direction sheet (the .app pipeline) / 四方向大图（app 管线）
     std::string frontImg, sideImg, backImg;   // user views / 用户三视图
     bool paletteGate = false;
+    // Test-kit tolerant gate (v0.11.3) / 测试素材包宽容闸门（v0.11.3）
+    bool paletteTolerantGate = false;
+    std::string kitDir;      // tests/fixtures/test_kit / 混色夹具目录
     bool fourdirGate = false;
     bool fourdir     = false;
 
@@ -277,6 +288,11 @@ bool parseArgs(int argc, char** argv, CliArgs& a, std::string& err) {
             a.sheet = v;
         } else if (s == "--palette-gate") {
             a.paletteGate = true;
+        } else if (s == "--palette-tolerant-gate") {
+            a.paletteTolerantGate = true;
+        } else if (s == "--kit") {
+            const char* v = needValue("--kit"); if (!v) return false;
+            a.kitDir = v;
         } else if (s == "--fourdir-gate") {
             a.fourdirGate = true;
         } else if (s == "--align-gate") {
@@ -2419,6 +2435,116 @@ int runPaletteGate(const CliArgs& a) {
     return 0;
 }
 
+// --palette-tolerant-gate (v0.11.3): the test kit's anti-aliased input
+// (tools/make_test_kit.py -> tests/fixtures/test_kit/) through both paths.
+// Strict must refuse the function conflict; tolerant must repair by majority
+// and count the minority pixels EXACTLY as expected.json records them — the
+// generator's count is the oracle.
+// --palette-tolerant-gate（v0.11.3）：测试素材包的抗锯齿输入
+// （tools/make_test_kit.py -> tests/fixtures/test_kit/）走两条路径。严格必须拒
+// 函数性冲突；宽容必须按多数派修复，且少数派像素计数与 expected.json 记录
+// **精确**一致 —— 生成器的计数就是判据。
+int runPaletteTolerantGate(const CliArgs& a) {
+    std::string err;
+    std::ifstream ef(a.kitDir + "/expected.json");
+    if (!ef) {
+        std::cout << "expected.json not found in " << a.kitDir << "   FAIL\n";
+        return 1;
+    }
+    const std::string text((std::istreambuf_iterator<char>(ef)),
+                           std::istreambuf_iterator<char>());
+    fb::JsonValue jv;
+    if (!fb::jsonParse(text, jv, err)) {
+        std::cout << "expected.json parse error: " << err << "   FAIL\n";
+        return 1;
+    }
+    const fb::JsonValue* conflicts = jv.find("mixedConflictPixels");
+    const long long wantConflicts = conflicts ? conflicts->asInt(-1) : -1;
+    cv::Vec4b wantMajority(0, 0, 0, 0);
+    bool haveMajority = false;
+    if (const fb::JsonValue* m = jv.find("majorityHairMid")) {
+        // JSON stores RGB; the pipeline works in BGRA. / JSON 存 RGB；管线用 BGRA。
+        if (m->type == fb::JsonValue::Array && m->arr.size() == 3) {
+            wantMajority = cv::Vec4b((uchar)m->arr[2].asInt(),
+                                     (uchar)m->arr[1].asInt(),
+                                     (uchar)m->arr[0].asInt(), 255);
+            haveMajority = true;
+        }
+    }
+
+    const cv::Mat mixed =
+        cv::imread(a.kitDir + "/mixed_front.png", cv::IMREAD_UNCHANGED);
+    if (mixed.empty() || mixed.type() != CV_8UC4) {
+        std::cout << "mixed_front.png missing or not BGRA   FAIL\n";
+        return 1;
+    }
+    fb::ChipSet chips;
+    if (!fb::loadChipSet(a.chips, chips, err)) {
+        std::cout << "chips load failed: " << err << "   FAIL\n";
+        return 1;
+    }
+    const fb::MotionChips* idle = chips.find("front_idle");
+    if (!idle || idle->frames.empty()) {
+        std::cout << "front_idle missing   FAIL\n";
+        return 1;
+    }
+    const cv::Mat& ref0 = idle->frames[0];
+
+    int failures = 0;
+
+    // ---- 1. strict refuses the function conflict ----
+    // ---- 1. 严格拒绝函数性冲突 ----
+    fb::PaletteMap dummy;
+    if (fb::extractPaletteMap(mixed, ref0, dummy, err)) {
+        std::cout << "  strict ACCEPTED the anti-aliased input   FAIL\n";
+        ++failures;
+    } else {
+        std::cout << "  strict refuses the function conflict   OK\n";
+    }
+
+    // ---- 2. tolerant repairs, counting minorities exactly ----
+    // ---- 2. 宽容修复，少数派计数精确 ----
+    fb::PaletteMap tol;
+    fb::ExtractStats st;
+    if (!fb::extractPaletteMap(mixed, ref0, tol, err, &st, /*tolerant=*/true)) {
+        std::cout << "  tolerant REJECTED the input: " << err << "   FAIL\n";
+        return 1;
+    }
+    if (wantConflicts < 0 || st.colourConflictPixels != wantConflicts) {
+        std::cout << "  minority count " << st.colourConflictPixels
+                  << ", expected " << wantConflicts << "   FAIL\n";
+        ++failures;
+    } else {
+        std::cout << "  tolerant repairs, minority count == " << wantConflicts
+                  << "   OK\n";
+    }
+
+    // ---- 3. hair_mid maps to the MAJORITY user colour ----
+    // ---- 3. hair_mid 映射到多数派用户色 ----
+    // The ref frame's hair_mid pixels are the template RGB (247,150,23) as
+    // BGRA. / 参考帧的 hair_mid 像素是模板 RGB(247,150,23) 的 BGRA。
+    const cv::Vec4b refHair(23, 150, 247, 255);
+    bool found = false;
+    for (const auto& sw : tol) {
+        if (sw.first != refHair) continue;
+        found = true;
+        if (!haveMajority || sw.second != wantMajority) {
+            std::cout << "  hair_mid maps to a NON-majority colour   FAIL\n";
+            ++failures;
+        } else {
+            std::cout << "  hair_mid -> majority colour   OK\n";
+        }
+    }
+    if (!found) {
+        std::cout << "  hair_mid absent from the extracted map   FAIL\n";
+        ++failures;
+    }
+
+    std::cout << (failures ? "PALETTE TOLERANT GATE FAIL\n"
+                           : "PALETTE TOLERANT GATE OK\n");
+    return failures ? 1 : 0;
+}
+
 // The four-direction sheet gate. Everything is synthesised from the chips and
 // the palette map, so no fixture images are needed. Checks the layout, the
 // idle cycle-fill, left = mirrored right, the alpha-mask invariant (with the
@@ -2634,6 +2760,7 @@ int runCli(int argc, char** argv) {
     if (a.chipReskin)  return runChipReskin(a);
     if (a.chipRender)  return runChipRender(a);
     if (a.paletteGate) return runPaletteGate(a);
+    if (a.paletteTolerantGate) return runPaletteTolerantGate(a);
     if (a.fourdirGate) return runFourdirGate(a);
     if (!a.alignCase.empty()) return runAlignGate(a);
     if (a.templateLoadGate)   return runTemplateLoadGate(a);
