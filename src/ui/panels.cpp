@@ -28,11 +28,11 @@ const char* kSlotLabels[3] = {
     "背面（上）",
 };
 
-// Row order must match core's SHEET_ROWS contract. / 行序必须与 core 的契约一致。
-const char* kRowLabels[fb::SHEET_ROWS] = {
-    "下 待机", "下 行走", "上 待机", "上 行走",
-    "左 待机", "左 行走", "右 待机", "右 行走",
-};
+// Display grid: 4 direction rows x 2 columns (idle | walk). Sheet row order is
+// dir*2 + (0 idle, 1 walk) per the SHEET_ROWS contract.
+// 显示网格：4 个方向行 x 2 列（待机 | 行走）。表内行序按 SHEET_ROWS 契约：
+// dir*2 +（0 待机，1 行走）。
+const char* kDirLabels[4] = {"下", "上", "左", "右"};
 
 // cv::Vec4b is BGRA; ImVec4 is RGBA. / cv::Vec4b 是 BGRA，ImVec4 是 RGBA。
 ImVec4 toImVec4(const cv::Vec4b& c) {
@@ -228,21 +228,33 @@ void drawMainContent(AppState& st, PreviewTextures& tex) {
 
     if (st.hasResult && tex.sheet) {
         const float cell = 32.f * (float)zoom;
-        // Every row plays its own 6-cell loop; idle rows breathe (f0 f1 f0 f1
-        // f0 f1 baked into the sheet) and walk rows run their full cycle.
-        // 每行播自己的 6 格循环；待机行呼吸（表里就是 f0 f1 f0 f1 f0 f1），
-        // 行走行走完整循环。
+        const float colWalk = 90.f + cell + 24.f;   // second column x / 第二列 x
+        // Every animation plays its own 6-cell loop; idle breathes (f0 f1 f0
+        // f1 f0 f1 baked into the sheet) and walk runs its full cycle.
+        // 每个动画播自己的 6 格循环；待机呼吸（表里就是 f0 f1 f0 f1 f0 f1），
+        // 行走走完整循环。
         const int frame = ((int)(clockTime * (float)fps) % fb::SHEET_COLS +
                            fb::SHEET_COLS) % fb::SHEET_COLS;
-        for (int r = 0; r < fb::SHEET_ROWS; ++r) {
-            ImGui::TextUnformatted(kRowLabels[r]);
+        // Column headers / 列头
+        ImGui::TextDisabled("方向");
+        ImGui::SameLine(90.f);
+        ImGui::TextUnformatted("待机");
+        ImGui::SameLine(colWalk);
+        ImGui::TextUnformatted("行走");
+        // 4 direction rows x 2 columns / 4 个方向行 x 2 列
+        for (int d = 0; d < 4; ++d) {
+            ImGui::TextUnformatted(kDirLabels[d]);
             ImGui::SameLine(90.f);
             ImVec2 uv0, uv1;
-            cellUv(st.result, frame, r, uv0, uv1);
+            cellUv(st.result, frame, d * 2, uv0, uv1);
+            ImGui::Image((ImTextureID)(intptr_t)tex.sheet, ImVec2(cell, cell),
+                         uv0, uv1);
+            ImGui::SameLine(colWalk);
+            cellUv(st.result, frame, d * 2 + 1, uv0, uv1);
             ImGui::Image((ImTextureID)(intptr_t)tex.sheet, ImVec2(cell, cell),
                          uv0, uv1);
         }
-        ImGui::TextDisabled("每行 6 帧循环 · %dx%d · 最近邻放大",
+        ImGui::TextDisabled("每格 6 帧循环 · %dx%d · 最近邻放大",
                             st.result.sheet.cols, st.result.sheet.rows);
     } else {
         ImGui::TextDisabled("尚无预览 —— 载入三张视图后自动开播");
