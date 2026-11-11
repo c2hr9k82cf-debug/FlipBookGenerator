@@ -85,6 +85,12 @@ void PreviewTextures::release() {
     slot[0] = slot[1] = slot[2] = sheet = 0;
     slotDiff[0] = slotDiff[1] = slotDiff[2] = 0;
     dressup[0] = dressup[1] = dressup[2] = 0;
+    // Reset the dress-up marker too: release() is called on every pipeline
+    // revision bump, and without this the dress-up previews stayed blank
+    // until the next compose (v0.11.1 bug B4).
+    // 捏人版本标记一并复位：release() 每次管线版本变化都会调用，不复位的话
+    // 捏人预览会一直空白，直到下次合成（v0.11.1 bug B4）。
+    dressupRevision = ~0ul;
     editorCanvas.release();   // same GL lifetime contract / 同一 GL 生命周期契约
 }
 

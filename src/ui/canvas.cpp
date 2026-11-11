@@ -85,19 +85,32 @@ CanvasInput PixelCanvas::draw(const char* id, const cv::Mat& pixels,
                         ImVec2(pos.x + size.x, pos.y + y * cell), grid);
     }
 
-    // Hover highlight + pixel mapping. / hover 高亮 + 像素映射。
-    if (hovered) {
+    // Hover highlight + pixel mapping. While a stroke is active the report
+    // stays live even outside the widget — the pixel is clamped to the edge,
+    // so a fast drag or a wobble past the border never drops the stroke.
+    // hover 高亮 + 像素映射。笔画进行中即使移出控件也继续回报 —— 像素钳到边缘，
+    // 快拖或越界抖动都不会掉笔。
+    const bool active = ImGui::IsItemActive();
+    if (hovered || active) {
         const ImVec2 m = ImGui::GetIO().MousePos;
-        const int px = (int)((m.x - pos.x) / cell);
-        const int py = (int)((m.y - pos.y) / cell);
-        if (px >= 0 && py >= 0 && px < pixels.cols && py < pixels.rows) {
+        int px = (int)((m.x - pos.x) / cell);
+        int py = (int)((m.y - pos.y) / cell);
+        if (active) {
+            if (px < 0) px = 0;
+            if (py < 0) py = 0;
+            if (px >= pixels.cols) px = pixels.cols - 1;
+            if (py >= pixels.rows) py = pixels.rows - 1;
+        } else if (px < 0 || py < 0 || px >= pixels.cols || py >= pixels.rows) {
+            px = py = -1;
+        }
+        if (px >= 0) {
             in.px = px;
             in.py = py;
             dl->AddRect(ImVec2(pos.x + px * cell, pos.y + py * cell),
                         ImVec2(pos.x + (px + 1) * cell, pos.y + (py + 1) * cell),
                         IM_COL32(255, 255, 255, 220));
-            in.painted = ImGui::IsMouseDown(ImGuiMouseButton_Left);
-            in.erased = ImGui::IsMouseDown(ImGuiMouseButton_Right);
+            in.painted = active && ImGui::IsMouseDown(ImGuiMouseButton_Left);
+            in.erased = active && ImGui::IsMouseDown(ImGuiMouseButton_Right);
         }
     }
     ImGui::PopID();

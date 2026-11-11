@@ -20,6 +20,7 @@
 
 #include <opencv2/core.hpp>
 
+#include <map>
 #include <string>
 
 namespace fb {
@@ -40,12 +41,29 @@ struct PartEditor {
     cv::Mat undoSnap[3];
     bool hasUndo = false;
 
+    // Per-slot draft stash (v0.11.1 bug B7): the work canvas belongs to ONE
+    // slot. Switching slots stashes the whole view set here and restores the
+    // target slot's set, so one slot's pixels never leak into another's.
+    // 按槽草稿暂存（v0.11.1 bug B7）：工作画布属于唯一槽位。切槽时整套视图存进
+    // 这里、目标槽的整套恢复回去 —— 一个槽的像素绝不漏进另一个槽。
+    struct Draft {
+        cv::Mat pixels[3];
+        bool touched[3] = {false, false, false};
+        std::string itemName = "untitled";
+    };
+    std::map<std::string, Draft> drafts;   // every slot but the active one /
+                                           // 除当前槽外的各槽
+
     bool viewReady(int v) const;   // drawn or loaded / 画过或载入过
     // Create the view's canvas on first edit. / 首次编辑时创建该视图画布。
     void ensureCanvas(int v);
     // Start a fresh empty item. / 开一个全新空部件。
     void blank(cv::Size sz);
     void setView(int v);
+    // Switch slots with draft stash/restore — never leaks pixels across
+    // slots; the single undo step dies with the old canvas.
+    // 切槽并暂存/恢复草稿 —— 像素绝不跨槽泄漏；单步撤销随旧画布一起作废。
+    void switchSlot(const std::string& newSlot);
 
     // Snapshot the whole item for the single undo step.
     // 为单步撤销给整件拍快照。

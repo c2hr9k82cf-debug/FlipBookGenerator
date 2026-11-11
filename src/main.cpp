@@ -1845,6 +1845,50 @@ int runFillGate(const CliArgs& a) {
         if (!bad) std::cout << "  blank: 12 templates legal (fill-ready)   OK\n";
     }
 
+    // ---- 6. slot switch never leaks pixels across slots (v0.11.1 bug B7) ----
+    // ---- 6. 切槽绝不把像素漏进别的槽（v0.11.1 bug B7） ----
+    {
+        fb::PartEditor ed;
+        ed.blank(spec.size);
+        ed.slot = "hair";
+        ed.paint(fb::PartEditor::FRONT, 4, 4, cHairMid);
+        ed.switchSlot("top");
+        bool ok = true;
+        // The top slot must start clean — hair's paint stays in the draft.
+        // top 槽必须从干净开始 —— hair 的笔画留在草稿里。
+        if (ed.viewReady(fb::PartEditor::FRONT)) {
+            std::cout << "  slot-switch: hair pixels leaked into top   FAIL\n";
+            ++failures; ok = false;
+        }
+        if (ed.slot != "top") {
+            std::cout << "  slot-switch: slot not updated   FAIL\n";
+            ++failures; ok = false;
+        }
+        ed.paint(fb::PartEditor::FRONT, 9, 9, cSkin);
+        ed.switchSlot("hair");
+        // Back in hair: the old paint survives, top's paint does not follow.
+        // 回到 hair：旧笔画还在，top 的笔画不跟过来。
+        if (!ed.viewReady(fb::PartEditor::FRONT) ||
+            px(ed.pixels[0], 4, 4) !=
+                cv::Vec4b(cHairMid[0], cHairMid[1], cHairMid[2], 255)) {
+            std::cout << "  slot-switch: hair draft not restored   FAIL\n";
+            ++failures; ok = false;
+        }
+        if (ed.viewReady(fb::PartEditor::FRONT) &&
+            px(ed.pixels[0], 9, 9)[3] != 0) {
+            std::cout << "  slot-switch: top pixels leaked into hair   FAIL\n";
+            ++failures; ok = false;
+        }
+        ed.switchSlot("top");
+        if (!ed.viewReady(fb::PartEditor::FRONT) ||
+            px(ed.pixels[0], 9, 9) !=
+                cv::Vec4b(cSkin[0], cSkin[1], cSkin[2], 255)) {
+            std::cout << "  slot-switch: top draft not restored   FAIL\n";
+            ++failures; ok = false;
+        }
+        if (ok) std::cout << "  slot-switch: drafts isolated per slot   OK\n";
+    }
+
     std::cout << (failures ? "FILL GATE FAIL\n" : "FILL GATE OK\n");
     return failures ? 1 : 0;
 }

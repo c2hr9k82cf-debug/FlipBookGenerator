@@ -2,12 +2,14 @@
 // 工具内部件编辑器（v0.10.0）。
 //
 // Interaction model (deliberately minimal, per plan): role-colour brush
-// (drag), eraser (drag, right button works too), whole-region fill (click),
-// ONE undo step, import with integer fine-tune, "infer back from front",
-// save into the user library, library import/export as folder copies.
-// 交互模型（按计划刻意最小）：角色色画笔（拖）、橡皮（拖，右键亦可）、整区填色
-// （点）、一步撤销、导入整数微调、「从正面推断」、存入用户库、库导入/导出为
-// 文件夹复制。
+// (drag), eraser (drag, left button OR the right-button quick erase), whole-
+// region fill (click), eyedropper (click), ONE undo step, import with
+// integer fine-tune, "infer back from front", save into the user library,
+// library import/export as folder copies. Strokes interpolate between
+// frames (Bresenham) so a fast drag does not dot.
+// 交互模型（按计划刻意最小）：角色色画笔（拖）、橡皮（拖，左键或右键快捷擦）、
+// 整区填色（点）、取色笔（点）、一步撤销、导入整数微调、「从正面推断」、存入
+// 用户库、库导入/导出为文件夹复制。笔画按帧间插值（Bresenham），快拖不断线。
 #include "part_editor_panel.h"
 
 #include "assets_locator.h"
@@ -31,7 +33,7 @@ const char* kSlotNames[6] = {"hair", "face", "top", "pants", "boots", "body"};
 const char* kSlotLabels[6] = {"发型", "脸", "上衣", "裤", "靴", "身体"};
 const char* kViewLabels[3] = {"正面", "侧面", "背面"};
 
-enum Tool { TOOL_BRUSH = 0, TOOL_ERASER = 1, TOOL_FILL = 2 };
+enum Tool { TOOL_BRUSH = 0, TOOL_ERASER = 1, TOOL_FILL = 2, TOOL_PICK = 3 };
 
 // cv::Vec4b (BGRA) -> ImVec4 (RGBA). / cv::Vec4b（BGRA）-> ImVec4（RGBA）。
 ImVec4 toImVec4(const cv::Vec4b& c) {
@@ -74,6 +76,7 @@ void drawPartEditor(AppState& st, PreviewTextures& tex) {
     static std::string brushRole = "hair_mid";
     static char nameBuf[64] = "untitled";
     static bool prevPaint = false, prevErase = false;
+    static int prevPx = -1, prevPy = -1;   // last frame's pixel for stroke interp / 上帧像素，供笔画插值
     static bool inited = false;
 
     // One-time: open a fresh item so the canvas is never a dead end.
@@ -98,8 +101,17 @@ void drawPartEditor(AppState& st, PreviewTextures& tex) {
         if (sel) ImGui::PushStyleColor(ImGuiCol_Button,
                                        ImVec4(0.24f, 0.52f, 0.88f, 1.f));
         if (ImGui::Button(kSlotLabels[i])) {
-            ed.slot = kSlotNames[i];
-            st.hasImport = false;
+            // B7: the canvas is per-slot — stash/restore via switchSlot, so
+            // one slot's drawing never leaks into another's.
+            // B7：画布按槽隔离 —— 走 switchSlot 暂存/恢复，一个槽的画
+            // 绝不漏进另一个槽。
+            if (ed.slot != kSlotNames[i]) {
+                ed.switchSlot(kSlotNames[i]);
+                std::snprintf(nameBuf, sizeof(nameBuf), "%s",
+                              ed.itemName.c_str());
+                st.hasImport = false;
+                ++st.revision;
+            }
         }
         if (sel) ImGui::PopStyleColor();
     }
@@ -194,12 +206,14 @@ void drawPartEditor(AppState& st, PreviewTextures& tex) {
     // 工具
     ImGui::Spacing();
     ImGui::Separator();
-    ImGui::TextUnformatted("工具（画笔/橡皮按住拖动，填色点一下）");
+    ImGui::TextUnformatted("工具（画笔/橡皮按住拖动，填色/取色点一下）");
     ImGui::RadioButton("画笔", &tool, TOOL_BRUSH);
     ImGui::SameLine();
     ImGui::RadioButton("橡皮", &tool, TOOL_ERASER);
     ImGui::SameLine();
     ImGui::RadioButton("填色", &tool, TOOL_FILL);
+    ImGui::SameLine();
+    ImGui::RadioButton("取色", &tool, TOOL_PICK);
     ImGui::SameLine();
     ImGui::BeginDisabled(!ed.hasUndo);
     if (ImGui::Button("撤销一步")) {
@@ -346,19 +360,50 @@ void drawPartEditor(AppState& st, PreviewTextures& tex) {
         }
 
         // Tool application. Snapshot on the down edge (one-step undo).
-        // 工具落笔。按下沿拍快照（一步撤销）。
-        if (in.px >= 0 && !view.empty()) {
-            const bool down = in.painted || in.erased;
+        // Strokes interpolate from the previous frame's pixel (Bresenham) —
+        // one frame of a fast drag crosses several pixels (B3). Left button
+        // runs the active tool; right button is always the quick eraser (B2).
+        // The blank-canvas first stroke works: paint/erase build the canvas
+        // internally (B1).
+        // 工具落笔。按下沿拍快照（一步撤销）。笔画从上一帧像素插值到本帧
+        // （Bresenham）—— 快拖一帧跨多像素（B3）。左键执行当前工具，右键永远是
+        // 快捷橡皮（B2）。空白画布第一笔即生效：paint/erase 内部自建画布（B1）。
+        if (in.px >= 0) {
+            const bool downL = in.painted, downR = in.erased;
+            const bool down = downL || downR;
+            const bool erasing = downR || (downL && tool == TOOL_ERASER);
+            const bool painting = downL && tool == TOOL_BRUSH;
+            const bool stroking = painting || erasing;
             if (down && !prevPaint && !prevErase) ed.snapshot();
-            if (tool == TOOL_BRUSH && in.painted) {
-                cv::Vec3b bgr;
-                if (st.templateSpec.roleBgr(brushRole, bgr))
-                    ed.paint(ed.view, in.px, in.py, bgr);
+            if (stroking) {
+                auto stroke = [&](int x, int y) {
+                    if (erasing) {
+                        ed.erase(ed.view, x, y);
+                    } else {
+                        cv::Vec3b bgr;
+                        if (st.templateSpec.roleBgr(brushRole, bgr))
+                            ed.paint(ed.view, x, y, bgr);
+                    }
+                };
+                if (prevPx >= 0 && (prevPaint || prevErase)) {
+                    int x0 = prevPx, y0 = prevPy, x1 = in.px, y1 = in.py;
+                    const int dxa = (x1 > x0 ? x1 - x0 : x0 - x1);
+                    const int dya = (y1 > y0 ? y0 - y1 : y1 - y0);   // negative / 负值
+                    const int sx = x0 < x1 ? 1 : -1;
+                    const int sy = y0 < y1 ? 1 : -1;
+                    int errb = dxa + dya;
+                    for (;;) {
+                        stroke(x0, y0);
+                        if (x0 == x1 && y0 == y1) break;
+                        const int e2 = 2 * errb;
+                        if (e2 >= dya) { errb += dya; x0 += sx; }
+                        if (e2 <= dxa) { errb += dxa; y0 += sy; }
+                    }
+                } else {
+                    stroke(in.px, in.py);
+                }
                 ++st.revision;
-            } else if (tool == TOOL_ERASER && in.erased) {
-                ed.erase(ed.view, in.px, in.py);
-                ++st.revision;
-            } else if (tool == TOOL_FILL && in.painted && !prevPaint) {
+            } else if (downL && !prevPaint && tool == TOOL_FILL && !view.empty()) {
                 // Click: recolour the clicked colour to the brush colour.
                 // 点一下：把被点颜色整区换成画笔色。
                 const cv::Vec4b src = view.at<cv::Vec4b>(in.py, in.px);
@@ -366,8 +411,30 @@ void drawPartEditor(AppState& st, PreviewTextures& tex) {
                 if (st.templateSpec.roleBgr(brushRole, bgr))
                     ed.fillRole(ed.view, cv::Vec3b(src[0], src[1], src[2]), bgr);
                 ++st.revision;
+            } else if (downL && !prevPaint && tool == TOOL_PICK) {
+                // Eyedropper (B6): pick the pixel's role colour.
+                // 取色笔（B6）：拾像素的角色色。
+                const cv::Vec4b c = draw.at<cv::Vec4b>(in.py, in.px);
+                if (c[3] == 0) {
+                    st.status = "取色：该像素透明，无颜色可拾。";
+                } else {
+                    const cv::Vec3b bgr(c[0], c[1], c[2]);
+                    std::string role;
+                    for (const auto& kv : st.templateSpec.palette) {
+                        if (kv.second == bgr) { role = kv.first; break; }
+                    }
+                    if (!role.empty()) {
+                        brushRole = role;
+                        st.status = "取色：" + role;
+                    } else {
+                        st.status = "取色：该像素不是角色色（换色管不着它，"
+                                    "建议用画笔/填色盖成角色色）。";
+                    }
+                }
             }
         }
+        prevPx = in.px;
+        prevPy = in.py;
         prevPaint = in.painted;
         prevErase = in.erased;
     }

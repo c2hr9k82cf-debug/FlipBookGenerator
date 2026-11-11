@@ -50,6 +50,46 @@ void PartEditor::setView(int v) {
     if (v >= 0 && v < 3) view = v;
 }
 
+// Switch slots with draft stash/restore (v0.11.1 bug B7). The work canvas
+// belongs to one slot only: the whole view set stashes into drafts[old], the
+// target slot's set comes back (or a fresh empty one). The single undo step
+// belongs to the old canvas and dies with it.
+// 切槽并暂存/恢复草稿（v0.11.1 bug B7）。工作画布只属于一个槽：整套视图存进
+// drafts[旧槽]，目标槽的整套取回来（没有就是全新空件）。单步撤销属于旧画布，
+// 随之作废。
+void PartEditor::switchSlot(const std::string& newSlot) {
+    if (newSlot.empty() || newSlot == slot) return;
+    Draft out;
+    for (int v = 0; v < 3; ++v) {
+        out.pixels[v] = pixels[v];
+        out.touched[v] = touched[v];
+    }
+    out.itemName = itemName;
+    drafts[slot] = out;
+
+    const auto it = drafts.find(newSlot);
+    if (it != drafts.end()) {
+        for (int v = 0; v < 3; ++v) {
+            pixels[v] = it->second.pixels[v];
+            touched[v] = it->second.touched[v];
+        }
+        itemName = it->second.itemName;
+        drafts.erase(it);
+    } else {
+        // Same contract as blank(): views start EMPTY ("not drawn yet" is
+        // distinct from "drawn all transparent"). / 与 blank() 同契约：视图
+        // 从"空"开始（"还没画"与"画了全透明"不同）。
+        for (int v = 0; v < 3; ++v) {
+            pixels[v] = cv::Mat();
+            touched[v] = false;
+        }
+        itemName = "untitled";
+    }
+    for (int v = 0; v < 3; ++v) undoSnap[v] = cv::Mat();
+    hasUndo = false;
+    slot = newSlot;
+}
+
 void PartEditor::snapshot() {
     for (int v = 0; v < 3; ++v) undoSnap[v] = pixels[v].clone();
     hasUndo = true;
