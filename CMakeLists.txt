@@ -351,6 +351,7 @@ if(FLIPBOOK_BUILD_GUI)
         src/ui/part_editor_panel.cpp
         src/ui/dressup_panel.cpp
         src/ui/canvas.cpp
+        src/ui/path_dialog.cpp
         src/ui/app_state.cpp
         src/ui/assets_locator.cpp
         src/ui/texture.cpp

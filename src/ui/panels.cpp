@@ -10,6 +10,7 @@
 #include "panels.h"
 #include "dressup_panel.h"
 #include "part_editor_panel.h"
+#include "path_dialog.h"
 #include "texture.h"
 #include "version.h"
 
@@ -17,6 +18,7 @@
 #include "portable-file-dialogs.h"
 
 #include <cmath>
+#include <cstdlib>
 #include <string>
 
 namespace fb {
@@ -291,19 +293,31 @@ void drawMainContent(AppState& st, PreviewTextures& tex) {
     ImGui::Spacing();
     ImGui::Separator();
     ImGui::TextUnformatted("导出");
-    ImGui::TextDisabled("点击后弹出保存窗口，由你选择存放位置。");
+    ImGui::TextDisabled("点击后弹出保存框，可改路径；保存成功路径自动进剪贴板。");
+    // B8: the pfd system dialog could fail silently ("save does nothing") —
+    // the ImGui modal always appears and always shows the outcome.
+    // B8：pfd 系统框可能静默失败（"保存没反应"）—— ImGui 模态框必弹、必有结局。
+    static fb::ui::PathDialog exportDlg;
     ImGui::BeginDisabled(!st.hasResult);
     if (ImGui::Button("导出大图 PNG...")) {
-        const std::string path = pfd::save_file(
-            "导出四方向大图", "fourdir_sheet.png",
-            {"PNG", "*.png"}).result();
-        if (!path.empty()) {
-            std::string out = path;
-            if (out.size() < 4 || out.substr(out.size() - 4) != ".png") out += ".png";
-            st.exportSheet(out);
-        }
+        const char* home = std::getenv("HOME");
+        const std::string def =
+            std::string(home ? home : ".") + "/Desktop/fourdir_sheet.png";
+        exportDlg.openInput(
+            "导出四方向大图", def, "导出",
+            [&st](const std::string& p, std::string& err) {
+                std::string out = p;
+                if (out.size() < 4 || out.substr(out.size() - 4) != ".png")
+                    out += ".png";
+                if (!st.exportSheet(out)) {
+                    err = "导出失败（检查目录是否存在、是否可写）。";
+                    return false;
+                }
+                return true;
+            });
     }
     ImGui::EndDisabled();
+    exportDlg.draw();
 
     ImGui::EndChild();
     ImGui::SameLine();

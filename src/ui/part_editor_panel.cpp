@@ -13,12 +13,14 @@
 #include "part_editor_panel.h"
 
 #include "assets_locator.h"
+#include "path_dialog.h"
 
 #include "imgui.h"
 #include "portable-file-dialogs.h"
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -131,7 +133,15 @@ void drawPartEditor(AppState& st, PreviewTextures& tex) {
         const std::vector<std::string> files = pfd::open_file(
             "选择部件图片", ".",
             {"图片文件", "*.png *.jpg *.jpeg *.bmp"}).result();
-        if (!files.empty()) st.editorImport(files[0]);
+        if (!files.empty()) {
+            st.editorImport(files[0]);
+        } else {
+            // Distinguish "cancelled" from "the system dialog never appeared"
+            // (B8) — drag-and-drop is the reliable fallback.
+            // 区分"取消"与"系统框压根没弹"（B8）—— 拖拽进窗口是可靠兜底。
+            st.status = "未选择文件。如果系统文件框没有弹出来，"
+                        "直接把 PNG 拖进窗口即可导入。";
+        }
     }
     ImGui::SameLine();
     ImGui::TextDisabled("也可直接拖入窗口");
@@ -258,42 +268,58 @@ void drawPartEditor(AppState& st, PreviewTextures& tex) {
     ImGui::Separator();
     ImGui::TextUnformatted("部件库");
     const std::string libRoot = userLibraryRoot();
+    // B8: save used to write silently and the status line was easy to miss —
+    // now every save pops a result dialog and the path lands on the clipboard.
+    // B8：保存以前静默写盘、状态行容易错过 —— 现在每次保存弹结果框，路径进剪贴板。
+    static fb::ui::PathDialog libDlg;
     ImGui::BeginDisabled(libRoot.empty() || ed.itemName.empty());
     if (ImGui::Button("保存到库")) {
         std::string err;
+        const std::string dir = libRoot + "/" + ed.slot + "/" + ed.itemName;
         if (!fb::saveEditorItem(ed, libRoot, err)) {
-            st.status = "保存失败：" + err;
+            libDlg.openResult("保存到库", "保存失败：" + err, "", false);
         } else {
             const int viol = templOk ? fb::roleConstraintViolations(
                                            ed.pixels[fb::PartEditor::FRONT],
                                            st.templateSpec)
                                      : 0;
-            st.status = "已保存：" + libRoot + "/" + ed.slot + "/" + ed.itemName +
-                        (viol ? "（警告：" + std::to_string(viol) +
-                                    " 个非角色色像素，全局换色不保证覆盖它们）"
-                              : "");
+            // The dress-up tab must see the new item without a restart
+            // (v0.11.1 bug B). / 换人 tab 必须不重启就看到新部件（v0.11.1 bug B）。
+            st.invalidateLibrary();
+            st.status = "已保存：" + dir;
+            libDlg.openResult(
+                "保存到库",
+                "已保存：" + dir +
+                    (viol ? "\n警告：" + std::to_string(viol) +
+                                " 个非角色色像素，全局换色不保证覆盖它们"
+                          : "") +
+                    "\n捏人换装 tab 里已经能看到它。\n（路径已复制到剪贴板）",
+                dir, true);
         }
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
     if (ImGui::Button("导入库...")) {
-        const std::string dir = pfd::select_folder("选择要导入的部件库目录").result();
-        if (!dir.empty()) {
-            std::string err;
-            if (copyLibraryDir(dir, libRoot, err)) st.status = "库已导入：" + libRoot;
-            else st.status = err;
-        }
+        libDlg.openInput(
+            "导入部件库（输入来源目录路径）", libRoot, "导入",
+            [&st, libRoot](const std::string& p, std::string& err) {
+                if (!copyLibraryDir(p, libRoot, err)) return false;
+                st.invalidateLibrary();
+                return true;
+            });
     }
     ImGui::SameLine();
     if (ImGui::Button("导出库...")) {
-        const std::string dir = pfd::select_folder("选择导出目标目录").result();
-        if (!dir.empty()) {
-            std::string err;
-            if (copyLibraryDir(libRoot, dir + "/parts_library", err))
-                st.status = "库已导出：" + dir + "/parts_library";
-            else st.status = err;
-        }
+        const char* home = std::getenv("HOME");
+        const std::string def =
+            std::string(home ? home : ".") + "/Desktop/parts_library";
+        libDlg.openInput(
+            "导出部件库（输入目标目录路径）", def, "导出",
+            [libRoot](const std::string& p, std::string& err) {
+                return copyLibraryDir(libRoot, p + "/parts_library", err);
+            });
     }
+    libDlg.draw();
     if (!libRoot.empty()) {
         ImGui::TextDisabled("库中「%s」槽物品：", kSlotLabels[
             (int)(std::find(std::begin(kSlotNames), std::end(kSlotNames), ed.slot) -

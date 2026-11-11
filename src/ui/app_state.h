@@ -143,6 +143,12 @@ public:
     // Load starter + user library once (template size is the coordinate
     // system). / 一次加载起步库 + 用户库（模板尺寸即坐标系）。
     bool ensureLibrary();
+    // Drop the cached library after a save/import so the next ensureLibrary()
+    // reloads it and the dress-up tab sees the change immediately (v0.11.1
+    // bug B: "saved but nothing happened").
+    // 保存/导入后丢弃库缓存，下次 ensureLibrary() 重载、捏人 tab 立刻可见
+    // （v0.11.1 bug B："保存了但像没发生"）。
+    void invalidateLibrary();
     // Compose into composePreview[3] (called when composeDirty). /
     // 合成到 composePreview[3]（composeDirty 时调用）。
     void recomposePreview();

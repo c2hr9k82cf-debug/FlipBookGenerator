@@ -304,6 +304,14 @@ void AppState::resetImport() {
     ++revision;
 }
 
+void AppState::invalidateLibrary() {
+    // Next ensureLibrary() reloads from disk; composeDirty makes the
+    // dress-up previews rebuild from the fresh list.
+    // 下次 ensureLibrary() 从磁盘重载；composeDirty 让捏人预览按新列表重建。
+    libraryReady = false;
+    composeDirty = true;
+}
+
 bool AppState::ensureLibrary() {
     if (libraryReady) return true;
     libraryError.clear();
