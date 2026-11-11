@@ -13,6 +13,7 @@
 // 交互菜单正被 Dear ImGui 引导式向导 + 可双击 .app 取代。不要往菜单加功能。
 
 #include "version.h"
+#include "core/align.h"
 #include "core/core.h"
 #include "spritesheet.h"
 #include "extractor.h"
@@ -92,6 +93,18 @@ void printCliUsage() {
         "      四方向大图闸门：8x6 布局、待机循环补帧（f0 f1 f0 f1 f0 f1）、left 行\n"
         "      = right 行镜像、alpha 掩码不变、非透明色全部是映射目标色。\n"
         "\n"
+        "  flipbook --align-gate CASE [--chips DIR]\n"
+        "      Alignment diagnostics gate (v0.9.0). CASE is one of:\n"
+        "        apply — identity / known shift / known scale are byte-exact;\n"
+        "        auto  — autoAlign recovers a known (scale,dx,dy) perturbation\n"
+        "                exactly (aligned input returns identity, mismatch 0);\n"
+        "        diff  — diff masks mark exactly the differing pixels, and the\n"
+        "                overlay colours them (magenta = silhouette, orange =\n"
+        "                colour conflict).\n"
+        "      对齐诊断闸门（v0.9.0）。CASE 为：apply 恒等/已知平移/已知缩放逐字节；\n"
+        "      auto 自动对齐精确恢复已知扰动（已对齐输入返回恒等、mismatch 0）；\n"
+        "      diff 差异掩码恰标出差异像素，叠加图着色（品红=剪影、橙=配色冲突）。\n"
+        "\n"
         "  flipbook --fourdir --front F.png --side S.png --back B.png\n"
         "      [--chips DIR] --out DIR\n"
         "      The app pipeline: extract palettes from three template-aligned\n"
@@ -127,6 +140,9 @@ struct CliArgs {
     bool paletteGate = false;
     bool fourdirGate = false;
     bool fourdir     = false;
+
+    // Alignment diagnostics gate (v0.9.0) / 对齐诊断闸门（v0.9.0）
+    std::string alignCase;   // apply | auto | diff
 };
 
 bool parseArgs(int argc, char** argv, CliArgs& a, std::string& err) {
@@ -173,6 +189,9 @@ bool parseArgs(int argc, char** argv, CliArgs& a, std::string& err) {
             a.paletteGate = true;
         } else if (s == "--fourdir-gate") {
             a.fourdirGate = true;
+        } else if (s == "--align-gate") {
+            const char* v = needValue("--align-gate"); if (!v) return false;
+            a.alignCase = v;
         } else if (s == "--fourdir") {
             a.fourdir = true;
         } else if (s == "--front") {
@@ -618,6 +637,223 @@ bool alphaMaskEqual(const cv::Mat& a, const cv::Mat& b) {
 // extractPaletteMap 必须精确往返。负向：提取器必须拒绝"单像素第三色"，且给了
 // --front/--side/--back 时必须拒绝它们（assets/character_alt*.png 就是过不了
 // 严格提取的已提交夹具 —— 真实 AI 图必须无抗锯齿、模板对齐）。
+// Alignment diagnostics gate (v0.9.0). Three cases:
+//   apply — identity / known shift / known scale resampling is byte-exact;
+//   auto  — autoAlign recovers a known (scale,dx,dy) perturbation exactly;
+//   diff  — diff masks mark exactly the differing pixels, overlay colours them.
+// 对齐诊断闸门（v0.9.0）。三种情形：
+//   apply 恒等/已知平移/已知缩放重采样逐字节；
+//   auto  自动对齐精确恢复已知 (scale,dx,dy) 扰动；
+//   diff  差异掩码恰标出差异像素，叠加图着色。
+int runAlignGate(const CliArgs& a) {
+    fb::ChipSet cs;
+    std::string err;
+    if (!fb::loadChipSet(a.chips, cs, err)) { std::cerr << "FAIL: " << err << "\n"; return 1; }
+    const fb::MotionChips* idle = cs.find("front_idle");
+    if (!idle || idle->frames.empty()) {
+        std::cerr << "FAIL: front_idle chips missing\n";
+        return 1;
+    }
+    const cv::Mat& ref = idle->frames[0];
+    int failures = 0;
+
+    // ---- apply: byte-exact transforms ----
+    // ---- apply：变换逐字节 ----
+    if (a.alignCase == "apply" || a.alignCase == "all") {
+        const fb::AlignParams ident{1, 0, 0};
+        if (!imagesIdentical(fb::applyAlign(ref, ident, ref.size()), ref)) {
+            std::cout << "  identity: applyAlign(ref,{1,0,0}) != ref   FAIL\n";
+            ++failures;
+        } else {
+            std::cout << "  identity: byte-exact   OK\n";
+        }
+        // Known shift: ref content moved by (+3,-2). Expected = ref sampled at
+        // (x-3, y+2), transparent where out of range.
+        // 已知平移：内容移 (+3,-2)。期望 = ref 采样 (x-3, y+2)，越界透明。
+        for (const fb::AlignParams p : {fb::AlignParams{1, 3, -2},
+                                        fb::AlignParams{1, -5, 4}}) {
+            cv::Mat expect = cv::Mat::zeros(ref.size(), CV_8UC4);
+            for (int y = 0; y < ref.rows; ++y)
+                for (int x = 0; x < ref.cols; ++x) {
+                    const int sx = x - p.dx, sy = y - p.dy;
+                    if (sx >= 0 && sy >= 0 && sx < ref.cols && sy < ref.rows)
+                        expect.at<cv::Vec4b>(y, x) = ref.at<cv::Vec4b>(sy, sx);
+                }
+            const cv::Mat got = fb::applyAlign(ref, p, ref.size());
+            if (!imagesIdentical(got, expect)) {
+                std::cout << "  shift(" << p.dx << "," << p.dy
+                          << "): not byte-exact   FAIL\n";
+                ++failures;
+            } else {
+                std::cout << "  shift(" << p.dx << "," << p.dy
+                          << "): byte-exact   OK\n";
+            }
+        }
+        // Known scale: nearest-neighbour upscale x2 then scale back == ref.
+        // 已知缩放：最近邻放大 x2 再缩回 == ref。
+        {
+            cv::Mat up(ref.rows * 2, ref.cols * 2, CV_8UC4);
+            for (int y = 0; y < up.rows; ++y)
+                for (int x = 0; x < up.cols; ++x)
+                    up.at<cv::Vec4b>(y, x) = ref.at<cv::Vec4b>(y / 2, x / 2);
+            const cv::Mat back = fb::applyAlign(up, fb::AlignParams{2, 0, 0}, ref.size());
+            if (!imagesIdentical(back, ref)) {
+                std::cout << "  scale x2 round trip: not byte-exact   FAIL\n";
+                ++failures;
+            } else {
+                std::cout << "  scale x2 round trip: byte-exact   OK\n";
+            }
+        }
+    }
+
+    // ---- auto: exact recovery of a known perturbation ----
+    // ---- auto：精确恢复已知扰动 ----
+    if (a.alignCase == "auto" || a.alignCase == "all") {
+        // Aligned input -> identity, mismatch 0. / 已对齐输入 -> 恒等，mismatch 0。
+        fb::AlignParams got;
+        int mis = -1;
+        if (!fb::autoAlign(ref, ref, got, &mis) ||
+            !(got == fb::AlignParams{1, 0, 0}) || mis != 0) {
+            std::cout << "  aligned input: got scale=" << got.scale << " d=("
+                      << got.dx << "," << got.dy << ") mis=" << mis
+                      << " (want identity, 0)   FAIL\n";
+            ++failures;
+        } else {
+            std::cout << "  aligned input: identity, mismatch 0   OK\n";
+        }
+        // Perturbations the search must undo exactly. Content touches the
+        // bottom row of the template, so dy perturbations stay <= 0 (a +dy
+        // would clip content and make exact recovery impossible).
+        // 搜索必须精确抵消的扰动。内容贴着模板底行，所以 dy 扰动取 <= 0（+dy 会
+        // 裁掉内容，不可能精确恢复）。
+        const fb::AlignParams cases[] = {
+            {1, 3, 0}, {1, -4, -2}, {1, 0, -3},
+        };
+        for (const fb::AlignParams want : cases) {
+            // Build the perturbed user image the way a shifted export would
+            // look: content moved by (want.dx, want.dy).
+            // 按平移导出的样子构造扰动图：内容移 (want.dx, want.dy)。
+            cv::Mat user = cv::Mat::zeros(ref.size(), CV_8UC4);
+            for (int y = 0; y < ref.rows; ++y)
+                for (int x = 0; x < ref.cols; ++x) {
+                    const int sx = x - want.dx, sy = y - want.dy;
+                    if (sx >= 0 && sy >= 0 && sx < ref.cols && sy < ref.rows)
+                        user.at<cv::Vec4b>(y, x) = ref.at<cv::Vec4b>(sy, sx);
+                }
+            fb::AlignParams out;
+            int mm = -1;
+            fb::autoAlign(user, ref, out, &mm);
+            // Recovered params must move the content BACK: (-want.dx, -want.dy).
+            // 恢复参数必须把内容移回去：(-want.dx, -want.dy)。
+            const fb::AlignParams expect{1, -want.dx, -want.dy};
+            if (!(out == expect)) {
+                std::cout << "  perturb(" << want.dx << "," << want.dy
+                          << "): recovered (" << out.dx << "," << out.dy
+                          << ") scale=" << out.scale << "   FAIL\n";
+                ++failures;
+            } else {
+                std::cout << "  perturb(" << want.dx << "," << want.dy
+                          << "): recovered exactly   OK\n";
+            }
+        }
+    }
+
+    // ---- diff: masks mark exactly the differing pixels ----
+    // ---- diff：掩码恰标出差异像素 ----
+    if (a.alignCase == "diff" || a.alignCase == "all") {
+        // user1 = ref with one pixel's alpha cleared (silhouette diff) and one
+        // pixel swapped to a third colour (functional conflict). Expected:
+        // maskDiffMask has exactly the first pixel, colourConflictMask exactly
+        // the second (it is the minority of its ref colour's tally).
+        // user1 = ref 清掉一个像素的 alpha（剪影差）+ 一个像素换成第三色（函数性
+        // 冲突）。期望：maskDiffMask 恰标第一个像素，colourConflictMask 恰标第二
+        // 个（它是其参考色统计里的少数派）。
+        cv::Mat user1 = ref.clone();
+        cv::Point diffPt(-1, -1), conflictPt(-1, -1);
+        // Pick two opaque pixels with the SAME ref colour so the third-colour
+        // swap creates a 1-vs-N tally (a real functional conflict).
+        // 选两个同色不透明像素，换第三色才造成 1 对 N 的统计（真函数性冲突）。
+        for (int y = 0; y < ref.rows && (diffPt.x < 0 || conflictPt.x < 0); ++y) {
+            for (int x = 0; x < ref.cols; ++x) {
+                const cv::Vec4b c = ref.at<cv::Vec4b>(y, x);
+                if (c[3] == 0) continue;
+                if (diffPt.x < 0) { diffPt = cv::Point(x, y); continue; }
+                if (conflictPt.x < 0 && c == ref.at<cv::Vec4b>(diffPt.y, diffPt.x)) {
+                    conflictPt = cv::Point(x, y);
+                    break;
+                }
+            }
+        }
+        if (conflictPt.x < 0) {
+            std::cerr << "FAIL: fixture has no repeated opaque colour\n";
+            return 1;
+        }
+        user1.at<cv::Vec4b>(diffPt.y, diffPt.x)[3] = 0;
+        user1.at<cv::Vec4b>(conflictPt.y, conflictPt.x) = cv::Vec4b(1, 2, 3, 255);
+
+        fb::PaletteMap dummy;
+        fb::ExtractStats st;
+        const bool okExtract =
+            fb::extractPaletteMap(user1, ref, dummy, err, &st, /*tolerant=*/true);
+        if (okExtract) {
+            std::cout << "  conflict: extraction ACCEPTED a functional conflict   FAIL\n";
+            ++failures;
+        }
+        // The masks must be exact even though extraction failed.
+        // 提取虽然失败，掩码必须精确。
+        auto maskExact = [](const cv::Mat& m, const cv::Point& p) {
+            if (m.empty() || m.size() != cv::Size(32, 32)) return false;
+            int set = 0;
+            for (int y = 0; y < m.rows; ++y)
+                for (int x = 0; x < m.cols; ++x)
+                    if (m.at<uchar>(y, x)) ++set;
+            return set == 1 && m.at<uchar>(p.y, p.x) == 255;
+        };
+        if (!maskExact(st.maskDiffMask, diffPt)) {
+            std::cout << "  diff mask: not exactly at (" << diffPt.x << ","
+                      << diffPt.y << ")   FAIL\n";
+            ++failures;
+        } else {
+            std::cout << "  diff mask: exactly 1 pixel   OK\n";
+        }
+        if (!maskExact(st.colourConflictMask, conflictPt)) {
+            std::cout << "  conflict mask: not exactly at (" << conflictPt.x
+                      << "," << conflictPt.y << ")   FAIL\n";
+            ++failures;
+        } else {
+            std::cout << "  conflict mask: exactly 1 pixel   OK\n";
+        }
+        // Overlay colours: magenta on the diff pixel, orange on the conflict.
+        // 叠加图着色：差异像素品红，冲突像素橙。
+        const cv::Mat ov = fb::renderDiffOverlay(user1, st.maskDiffMask,
+                                                 st.colourConflictMask);
+        const cv::Vec4b magenta(255, 0, 255, 255), orange(0, 165, 255, 255);
+        if (ov.size() != ref.size() ||
+            ov.at<cv::Vec4b>(diffPt.y, diffPt.x) != magenta ||
+            ov.at<cv::Vec4b>(conflictPt.y, conflictPt.x) != orange) {
+            std::cout << "  overlay: wrong colours at the diff pixels   FAIL\n";
+            ++failures;
+        } else {
+            std::cout << "  overlay: magenta + orange at the exact pixels   OK\n";
+        }
+        // Tolerant mask-only diff must still succeed (warn, don't reject).
+        // 仅剪影差在宽容模式必须仍成功（提醒而不拒绝）。
+        cv::Mat user2 = ref.clone();
+        user2.at<cv::Vec4b>(diffPt.y, diffPt.x)[3] = 0;
+        fb::ExtractStats st2;
+        if (!fb::extractPaletteMap(user2, ref, dummy, err, &st2, true) ||
+            st2.maskDiffPixels != 1) {
+            std::cout << "  tolerant mask-only diff: should pass with 1 warning   FAIL\n";
+            ++failures;
+        } else {
+            std::cout << "  tolerant mask-only diff: passes, 1 pixel warned   OK\n";
+        }
+    }
+
+    std::cout << (failures ? "ALIGN GATE FAIL\n" : "ALIGN GATE OK\n");
+    return failures ? 1 : 0;
+}
+
 int runPaletteGate(const CliArgs& a) {
     fb::ChipSet cs;
     std::string err;
@@ -967,6 +1203,7 @@ int runCli(int argc, char** argv) {
     if (a.chipRender)  return runChipRender(a);
     if (a.paletteGate) return runPaletteGate(a);
     if (a.fourdirGate) return runFourdirGate(a);
+    if (!a.alignCase.empty()) return runAlignGate(a);
     if (a.fourdir)     return runFourdir(a);
     if (a.allPresets)  return runPresets(a, {"idle", "walk_side", "walk_front", "walk_up"});
     if (!a.preset.empty()) return runPresets(a, {a.preset});

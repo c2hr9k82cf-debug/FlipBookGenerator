@@ -7,6 +7,7 @@
 // 可读，GUI 保持薄。
 #pragma once
 
+#include "core/align.h"
 #include "core/core.h"
 
 #include <string>
@@ -14,14 +15,30 @@
 namespace fb {
 namespace ui {
 
-// One input view slot (front / side / back). The image must be
-// template-aligned with the reference chips (strict extraction).
-// 一个输入视图槽（front / side / back）。图必须与参考芯片模板对齐（严格提取）。
+// One input view slot (front / side / back). `image` is the raw file; `aligned`
+// is the integer-aligned 32x32 copy the pipeline actually consumes (v0.9.0).
+// `diffOverlay` is the transparent diff-mark texture (magenta = silhouette
+// diff, orange = colour conflict), empty when there is nothing to show.
+// 一个输入视图槽（front / side / back）。image 是原始文件；aligned 是管线真正
+// 消费的整数对齐 32x32 拷贝（v0.9.0）。diffOverlay 是透明差异标记图（品红 = 剪影
+// 差、橙 = 配色冲突），无差异时为空。
 struct ViewSlot {
     std::string path;      // loaded image path / 已加载图的路径
-    cv::Mat image;         // BGRA / BGRA 图
+    cv::Mat image;         // raw BGRA / 原始 BGRA 图
+    fb::AlignParams align; // integer scale + translation / 整数缩放 + 平移
+    cv::Mat aligned;       // aligned copy fed to the pipeline / 喂给管线的对齐拷贝
+    cv::Mat diffOverlay;   // BGRA diff marks (transparent base) / BGRA 差异标记（透明底）
+    int maskDiffPx = 0;        // silhouette diff pixels / 剪影差像素数
+    int colourConflictPx = 0;  // colour-conflict pixels / 配色冲突像素数
     bool loaded() const { return !image.empty(); }
-    void clear() { path.clear(); image = cv::Mat(); }
+    void clear() {
+        path.clear();
+        image = cv::Mat();
+        align = fb::AlignParams{};
+        aligned = cv::Mat();
+        diffOverlay = cv::Mat();
+        maskDiffPx = colourConflictPx = 0;
+    }
 };
 
 class AppState {
@@ -50,9 +67,19 @@ public:
     // Locate and load the chip bundle once. / 定位并加载一次芯片包。
     bool ensureChips();
 
-    // Load one view's image, then auto-run the pipeline when all three are in.
-    // 载入一张视图图；三张齐备时自动跑管线。
+    // Load one view's image (auto-aligned on load), then auto-run the pipeline
+    // when all three are in. / 载入一张视图图（载入即自动对齐）；三张齐备时自动跑管线。
     bool setView(int idx, const std::string& path);
+
+    // Manual fine-tune of one slot's alignment (v0.9.0): nudge scale/offset,
+    // re-align, re-run the whole pipeline (milliseconds — no debounce needed).
+    // 手动微调一个槽的对齐（v0.9.0）：改缩放/偏移、重新对齐、重跑整条管线
+    // （毫秒级 —— 无需防抖）。
+    void nudgeAlign(int idx, int dScale, int dx, int dy);
+    // Re-run the automatic search for one slot. / 给一个槽重跑自动搜索。
+    void autoAlignView(int idx);
+    // Restore the params the last auto search chose. / 恢复上次自动搜索选定的参数。
+    void resetAlign(int idx);
 
     // Drop one slot (or everything) and reset the pipeline — so the user can
     // start over without restarting the app. / 清掉一个槽（或全部）并重置管线 ——

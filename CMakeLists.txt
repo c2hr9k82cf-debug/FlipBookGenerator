@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(FlipBookGenerator VERSION 0.8.8 LANGUAGES CXX)
+project(FlipBookGenerator VERSION 0.9.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -49,6 +49,7 @@ add_library(flipbook_core STATIC
     src/core/image_io.cpp
     src/core/palette.cpp
     src/core/sheet.cpp
+    src/core/align.cpp
 )
 target_link_libraries(flipbook_core ${OPENCV_MINIMAL_LIBS})
 
@@ -159,6 +160,27 @@ add_test(
             --map ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates/motion_chips/palette_map.txt
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
+
+# Alignment diagnostics gates (v0.9.0). apply: identity / known shift / known
+# scale resampling byte-exact; auto: exact recovery of a known (scale,dx,dy)
+# perturbation; diff: masks mark exactly the differing pixels and the overlay
+# colours them. Template-level, run once.
+# 对齐诊断闸门（v0.9.0）。apply：恒等/已知平移/已知缩放重采样逐字节；
+# auto：精确恢复已知 (scale,dx,dy) 扰动；diff：掩码恰标差异像素、叠加图着色。
+# 模板级，跑一次。
+foreach(align_case apply auto diff)
+    if(align_case STREQUAL "diff")
+        set(align_test diff_mask)
+    else()
+        set(align_test align_${align_case})
+    endif()
+    add_test(
+        NAME ${align_test}
+        COMMAND flipbook --align-gate ${align_case} --chips
+                ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates/motion_chips
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+endforeach()
 
 # ---------------------------------------------------------------------------
 # GUI (macOS desktop app) / GUI（macOS 桌面应用）

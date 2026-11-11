@@ -30,11 +30,13 @@ std::string colourStr(const cv::Vec4b& c) {
     return os.str();
 }
 
-// One ref colour's tally of user colours seen at its pixels.
-// 一个参考色在其像素处见到的用户色统计。
+// One ref colour's tally of user colours seen at its pixels. Full coordinate
+// lists so the conflict mask can mark every minority pixel (32x32 = 1024 px
+// max, memory is free).
+// 一个参考色在其像素处见到的用户色统计。记全坐标表，冲突掩码才能标出每个少数派
+// 像素（32x32 最多 1024 px，内存无成本）。
 struct Tally {
-    std::map<uint32_t, int> userCounts;   // user colour key -> pixel count
-    std::map<uint32_t, cv::Point> firstAt;  // user colour key -> first coordinate
+    std::map<uint32_t, std::vector<cv::Point>> at;   // user colour key -> coordinates
     int pixels = 0;
 };
 
@@ -67,6 +69,15 @@ bool extractPaletteMap(const cv::Mat& userImg, const cv::Mat& refCell,
     int maskDiff = 0, compared = 0;
     cv::Point maskExample(-1, -1);
 
+    // Diff masks are collected even on the failure paths below — a failure is
+    // exactly when the user needs the visual diagnosis (v0.9.0 alignment tool).
+    // 差异掩码在下面的失败路径也照收集 —— 失败恰恰是用户最需要可视化诊断的时候
+    // （v0.9.0 对齐工具）。
+    if (stats) {
+        stats->maskDiffMask       = cv::Mat::zeros(refCell.size(), CV_8U);
+        stats->colourConflictMask = cv::Mat::zeros(refCell.size(), CV_8U);
+    }
+
     for (int y = 0; y < refCell.rows; ++y) {
         const cv::Vec4b* r = refCell.ptr<cv::Vec4b>(y);
         const cv::Vec4b* u = userImg.ptr<cv::Vec4b>(y);
@@ -76,15 +87,14 @@ bool extractPaletteMap(const cv::Mat& userImg, const cv::Mat& refCell,
             if (refOpaque != usrOpaque) {
                 ++maskDiff;
                 if (maskExample.x < 0) maskExample = cv::Point(x, y);
+                if (stats) stats->maskDiffMask.at<uchar>(y, x) = 255;
                 continue;
             }
             if (!refOpaque) continue;   // transparent pixels carry no colour / 透明像素无颜色
             ++compared;
             Tally& t = tally[colourKey(r[x])];
             ++t.pixels;
-            const uint32_t uk = colourKey(u[x]);
-            if (!t.userCounts.count(uk)) t.firstAt[uk] = cv::Point(x, y);
-            ++t.userCounts[uk];
+            t.at[colourKey(u[x])].push_back(cv::Point(x, y));
         }
     }
 
@@ -106,30 +116,66 @@ bool extractPaletteMap(const cv::Mat& userImg, const cv::Mat& refCell,
         }
     }
 
-    // Function check: one ref colour -> exactly one user colour.
-    // 函数性检查：一个参考色恰好对应一个用户色。
+    // Function check: one ref colour -> exactly one user colour. All conflicts
+    // across ALL ref colours are collected into colourConflictMask before the
+    // early return, so the diagnosis is complete even on failure.
+    // 函数性检查：一个参考色恰好对应一个用户色。所有参考色的冲突先全部收进
+    // colourConflictMask 再提前返回 —— 失败时诊断也是完整的。
     std::vector<std::pair<uint32_t, uint32_t>> pairs;   // (ref key, user key), sorted
+    std::ostringstream conflictErr;
+    bool anyConflict = false;
     for (const auto& kv : tally) {
         const Tally& t = kv.second;
-        if (t.userCounts.size() != 1) {
-            std::ostringstream os;
-            os << "extractPaletteMap: ref colour " << colourStr(cv::Vec4b(
-                   (uchar)(kv.first & 0xFF), (uchar)((kv.first >> 8) & 0xFF),
-                   (uchar)((kv.first >> 16) & 0xFF), (uchar)((kv.first >> 24) & 0xFF)))
-               << " maps to " << t.userCounts.size() << " user colours:";
-            for (const auto& uc : t.userCounts) {
-                const cv::Vec4b c((uchar)(uc.first & 0xFF), (uchar)((uc.first >> 8) & 0xFF),
-                                  (uchar)((uc.first >> 16) & 0xFF), (uchar)((uc.first >> 24) & 0xFF));
-                const cv::Point p = t.firstAt.at(uc.first);
-                os << " " << colourStr(c) << " x" << uc.second
-                   << " (first at " << p.x << "," << p.y << ");";
+        if (t.at.size() != 1) {
+            // Majority user colour = largest count (ties: smaller key — the map
+            // order is deterministic). Everything else is the minority.
+            // 多数派用户色 = 计数最大者（平局取较小 key —— map 顺序确定性）。
+            // 其余都是少数派。
+            uint32_t majority = 0;
+            size_t bestCount = 0;
+            for (const auto& uc : t.at) {
+                if (uc.second.size() > bestCount) {
+                    bestCount = uc.second.size();
+                    majority = uc.first;
+                }
             }
-            os << " — not a function (is the image anti-aliased or misaligned? / "
-               << "不是函数（图有抗锯齿或没对齐？）)";
-            err = os.str();
-            return false;
+            if (stats) {
+                for (const auto& uc : t.at) {
+                    if (uc.first == majority) continue;
+                    for (const cv::Point& p : uc.second) {
+                        stats->colourConflictMask.at<uchar>(p.y, p.x) = 255;
+                        ++stats->colourConflictPixels;
+                    }
+                }
+            }
+            if (!anyConflict) {
+                anyConflict = true;
+                conflictErr << "extractPaletteMap: ref colour " << colourStr(cv::Vec4b(
+                        (uchar)(kv.first & 0xFF), (uchar)((kv.first >> 8) & 0xFF),
+                        (uchar)((kv.first >> 16) & 0xFF), (uchar)((kv.first >> 24) & 0xFF)))
+                    << " maps to " << t.at.size() << " user colours:";
+                for (const auto& uc : t.at) {
+                    const cv::Vec4b c((uchar)(uc.first & 0xFF), (uchar)((uc.first >> 8) & 0xFF),
+                                      (uchar)((uc.first >> 16) & 0xFF), (uchar)((uc.first >> 24) & 0xFF));
+                    const cv::Point p = uc.second.front();
+                    conflictErr << " " << colourStr(c) << " x" << uc.second.size()
+                                << " (first at " << p.x << "," << p.y << ");";
+                }
+                conflictErr << " — not a function (is the image anti-aliased or misaligned? / "
+                            << "不是函数（图有抗锯齿或没对齐？）)";
+            }
+            continue;
         }
-        pairs.push_back({kv.first, t.userCounts.begin()->first});
+        pairs.push_back({kv.first, t.at.begin()->first});
+    }
+    if (anyConflict) {
+        if (stats) {
+            stats->comparedPixels = compared;
+            stats->mappedColours  = (int)pairs.size();
+            stats->maskDiffPixels = maskDiff;
+        }
+        err = conflictErr.str();
+        return false;
     }
 
     out.reserve(pairs.size());
@@ -146,6 +192,38 @@ bool extractPaletteMap(const cv::Mat& userImg, const cv::Mat& refCell,
         stats->maskDiffPixels = maskDiff;   // 0 in strict mode / 严格模式下为 0
     }
     return true;
+}
+
+cv::Mat renderDiffOverlay(const cv::Mat& userAligned,
+                          const cv::Mat& maskDiffMask,
+                          const cv::Mat& colourConflictMask) {
+    cv::Mat out;
+    if (maskDiffMask.empty() && colourConflictMask.empty()) return out;
+    const cv::Size sz = !maskDiffMask.empty() ? maskDiffMask.size()
+                                              : colourConflictMask.size();
+    if (!userAligned.empty() && userAligned.size() != sz) return out;   // defensive / 防御
+    out = cv::Mat::zeros(sz, CV_8UC4);   // fully transparent base / 全透明底
+
+    // Orange first (colour conflict), magenta on top (silhouette diff reads
+    // first when both mark the same pixel).
+    // 橙先画（配色冲突），品红盖上（同像素两种差异时以剪影差为主）。
+    if (!colourConflictMask.empty()) {
+        for (int y = 0; y < sz.height; ++y) {
+            const uchar* m = colourConflictMask.ptr<uchar>(y);
+            cv::Vec4b* o = out.ptr<cv::Vec4b>(y);
+            for (int x = 0; x < sz.width; ++x)
+                if (m[x]) o[x] = cv::Vec4b(0, 165, 255, 255);   // orange / 橙
+        }
+    }
+    if (!maskDiffMask.empty()) {
+        for (int y = 0; y < sz.height; ++y) {
+            const uchar* m = maskDiffMask.ptr<uchar>(y);
+            cv::Vec4b* o = out.ptr<cv::Vec4b>(y);
+            for (int x = 0; x < sz.width; ++x)
+                if (m[x]) o[x] = cv::Vec4b(255, 0, 255, 255);   // magenta / 品红
+        }
+    }
+    return out;
 }
 
 }  // namespace fb

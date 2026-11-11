@@ -189,12 +189,33 @@ std::vector<cv::Mat> renderFromChips(const MotionChips& chips, const PaletteMap&
 // Palette extraction — reskin from a user image / 配色提取 —— 从用户图换皮
 // ---------------------------------------------------------------------------
 
-// Diagnostics from extractPaletteMap. / extractPaletteMap 的诊断数据。
+// Diagnostics from extractPaletteMap. The two masks are 8-bit, refCell-sized,
+// 255 = the pixel is a diff; filled even when extraction FAILS (a failure is
+// exactly when the user most needs the visual diagnosis). Empty when stats
+// were not requested or nothing was compared.
+// extractPaletteMap 的诊断数据。两张掩码为 8 位、与 refCell 同尺寸，255 = 该像素
+// 是差异；**提取失败时也照填**（失败恰恰是用户最需要可视化诊断的时候）。未请求
+// stats 或无可比像素时为空。
 struct ExtractStats {
     int comparedPixels = 0;   // non-transparent ref pixels compared / 比对过的参考非透明像素
     int mappedColours  = 0;   // distinct ref colours mapped / 映射出的参考色数
     int maskDiffPixels = 0;   // alpha-mask mismatches / alpha 掩码不一致像素数
+    cv::Mat maskDiffMask;       // CV_8U; 255 = alpha-mask mismatch pixel / 255=alpha 掩码不一致像素
+    cv::Mat colourConflictMask; // CV_8U; 255 = minority pixel of a conflicted ref colour / 255=函数性冲突的少数派像素
+    int colourConflictPixels = 0;   // set bits in colourConflictMask / colourConflictMask 的置位数
 };
+
+// Transparent BGRA overlay marking the diff pixels on top of a (typically
+// aligned) user image: magenta = silhouette mismatch, orange = colour
+// conflict. Marks only — no grey base — so the GUI can composite it straight
+// over the slot thumbnail. Pure core function, headless-testable; the UI only
+// uploads the result as a texture.
+// 透明 BGRA 叠加图，在（通常是已对齐的）用户图上标出差异像素：品红 = 剪影不一致，
+// 橙 = 配色冲突。只有标记、无灰底 —— GUI 可直接叠在槽缩略图上。纯 core 函数，
+// 可无头测试；UI 只负责把结果当纹理上传。
+cv::Mat renderDiffOverlay(const cv::Mat& userAligned,
+                          const cv::Mat& maskDiffMask,
+                          const cv::Mat& colourConflictMask);
 
 // Extract an exact BGRA palette map (refCell -> userImg) by pixel diff. Strict:
 // same size, identical alpha mask, and every ref colour must map to exactly ONE

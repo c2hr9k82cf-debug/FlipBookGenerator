@@ -6,13 +6,14 @@
 namespace fb {
 namespace ui {
 
-// GL texture cache for the previews (slot thumbnails + the sheet). Re-uploaded
-// whenever AppState::revision changes. Owns GL textures: call release() before
-// the GL context dies.
-// 预览用 GL 纹理缓存（槽缩略图 + 大图）。AppState::revision 变化时重传。
-// 持有 GL 纹理：GL 上下文销毁前调用 release()。
+// GL texture cache for the previews (slot thumbnails + diff overlays + the
+// sheet). Re-uploaded whenever AppState::revision changes. Owns GL textures:
+// call release() before the GL context dies.
+// 预览用 GL 纹理缓存（槽缩略图 + 差异叠加 + 大图）。AppState::revision 变化时
+// 重传。持有 GL 纹理：GL 上下文销毁前调用 release()。
 struct PreviewTextures {
     unsigned int slot[3] = {0, 0, 0};
+    unsigned int slotDiff[3] = {0, 0, 0};   // transparent diff marks / 透明差异标记
     unsigned int sheet = 0;
     unsigned long uploadedRevision = ~0ul;
 

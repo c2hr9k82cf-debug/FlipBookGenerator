@@ -73,15 +73,27 @@ void PreviewTextures::release() {
     deleteTexture(slot[0]);
     deleteTexture(slot[1]);
     deleteTexture(slot[2]);
+    deleteTexture(slotDiff[0]);
+    deleteTexture(slotDiff[1]);
+    deleteTexture(slotDiff[2]);
     deleteTexture(sheet);
     slot[0] = slot[1] = slot[2] = sheet = 0;
+    slotDiff[0] = slotDiff[1] = slotDiff[2] = 0;
 }
 
 void PreviewTextures::sync(AppState& st) {
     if (uploadedRevision == st.revision) return;
     release();
-    for (int v = 0; v < 3; ++v)
-        if (st.views[v].loaded()) slot[v] = matToTexture(st.views[v].image);
+    for (int v = 0; v < 3; ++v) {
+        // Show the ALIGNED copy: it is what the pipeline consumes, and it is
+        // the same 32x32 coordinate system as the diff overlay.
+        // 显示对齐拷贝：它是管线实际消费的图，且与差异叠加同处 32x32 坐标系。
+        if (st.views[v].loaded())
+            slot[v] = matToTexture(!st.views[v].aligned.empty()
+                                       ? st.views[v].aligned : st.views[v].image);
+        if (!st.views[v].diffOverlay.empty())
+            slotDiff[v] = matToTexture(st.views[v].diffOverlay);
+    }
     if (st.hasResult) sheet = matToTexture(st.result.sheet);
     uploadedRevision = st.revision;
 }
@@ -110,11 +122,24 @@ void drawMainContent(AppState& st, PreviewTextures& tex) {
     for (int v = 0; v < 3; ++v) {
         ImGui::Spacing();
         ImGui::TextUnformatted(kSlotLabels[v]);
+        // Thumbnail + diff overlay (v0.9.0): the transparent mark texture is
+        // composited over the aligned copy — magenta = silhouette diff,
+        // orange = colour conflict.
+        // 缩略图 + 差异叠加（v0.9.0）：透明标记纹理叠在对齐拷贝上 —— 品红 = 剪影差、
+        // 橙 = 配色冲突。
+        const float kThumb = 96.f;
+        const ImVec2 thumbPos = ImGui::GetCursorScreenPos();
         if (tex.slot[v]) {
-            ImGui::Image((ImTextureID)(intptr_t)tex.slot[v], ImVec2(64, 64));
+            ImGui::Image((ImTextureID)(intptr_t)tex.slot[v], ImVec2(kThumb, kThumb));
         } else {
-            ImGui::Dummy(ImVec2(64, 64));
+            ImGui::Dummy(ImVec2(kThumb, kThumb));
         }
+        if (tex.slotDiff[v]) {
+            ImGui::SetCursorScreenPos(thumbPos);
+            ImGui::Image((ImTextureID)(intptr_t)tex.slotDiff[v], ImVec2(kThumb, kThumb));
+        }
+        ImGui::SetCursorScreenPos(thumbPos);
+        ImGui::Dummy(ImVec2(kThumb, kThumb));   // re-anchor below the thumb / 锚回缩略图下方
         ImGui::SameLine();
         ImGui::BeginGroup();
         if (st.views[v].loaded()) {
@@ -134,6 +159,45 @@ void drawMainContent(AppState& st, PreviewTextures& tex) {
         if (ImGui::Button(("清除##" + std::to_string(v)).c_str())) st.clearView(v);
         ImGui::EndDisabled();
         ImGui::EndGroup();
+
+        // ---- alignment fine-tune row (v0.9.0) ----
+        // ---- 对齐微调行（v0.9.0）----
+        if (st.views[v].loaded()) {
+            const fb::AlignParams& al = st.views[v].align;
+            const std::string alignHead = "对齐...###align" + std::to_string(v);
+            if (ImGui::CollapsingHeader(alignHead.c_str())) {
+                ImGui::TextDisabled("x%d 偏移(%+d,%+d) · 差异 %d 像素（剪影 %d · 配色 %d）",
+                                    al.scale, al.dx, al.dy,
+                                    st.views[v].maskDiffPx + st.views[v].colourConflictPx,
+                                    st.views[v].maskDiffPx, st.views[v].colourConflictPx);
+                const std::string vid = "##" + std::to_string(v);
+                if (ImGui::SmallButton(("自动对齐" + vid).c_str())) st.autoAlignView(v);
+                ImGui::SameLine();
+                if (ImGui::SmallButton(("复位" + vid).c_str())) st.resetAlign(v);
+                ImGui::SameLine();
+                ImGui::TextDisabled("自动搜索 / 恢复默认");
+                // Translation buttons: nudge 1px at a time. / 平移四键：每次 1px。
+                if (ImGui::SmallButton(("左" + vid).c_str())) st.nudgeAlign(v, 0, -1, 0);
+                ImGui::SameLine();
+                if (ImGui::SmallButton(("右" + vid).c_str())) st.nudgeAlign(v, 0, +1, 0);
+                ImGui::SameLine();
+                if (ImGui::SmallButton(("上" + vid).c_str())) st.nudgeAlign(v, 0, 0, -1);
+                ImGui::SameLine();
+                if (ImGui::SmallButton(("下" + vid).c_str())) st.nudgeAlign(v, 0, 0, +1);
+                ImGui::SameLine();
+                ImGui::TextDisabled("平移 1px");
+                // Scale buttons: integer factors only. / 缩放两键：只走整数倍。
+                ImGui::BeginDisabled(al.scale <= 1);
+                if (ImGui::SmallButton(("缩小" + vid).c_str())) st.nudgeAlign(v, -1, 0, 0);
+                ImGui::EndDisabled();
+                ImGui::SameLine();
+                ImGui::BeginDisabled(al.scale >= 4);
+                if (ImGui::SmallButton(("放大" + vid).c_str())) st.nudgeAlign(v, +1, 0, 0);
+                ImGui::EndDisabled();
+                ImGui::SameLine();
+                ImGui::TextDisabled("最近邻 x%d", al.scale);
+            }
+        }
     }
 
     // ---- palette extraction, collapsed: the swatch list is long ----
