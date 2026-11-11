@@ -1,0 +1,46 @@
+{
+  "_schema": "blank parts template v1",
+  "canvas": [
+    32,
+    32
+  ],
+  "note": "Blank but shaped: outline kept, interior is white placeholder. Fill in-tool or externally, then save into the parts library. / 空白有形状：描边保留，内部白色占位。工具内或外部填色后存入部件库。",
+  "slots": {
+    "hair": {
+      "zOrder": 40,
+      "placeholder": "white",
+      "front": "hair_front.png",
+      "side": "hair_side.png"
+    },
+    "face": {
+      "zOrder": 30,
+      "placeholder": "white",
+      "front": "face_front.png",
+      "side": "face_side.png"
+    },
+    "top": {
+      "zOrder": 20,
+      "placeholder": "white",
+      "front": "top_front.png",
+      "side": "top_side.png"
+    },
+    "pants": {
+      "zOrder": 10,
+      "placeholder": "white",
+      "front": "pants_front.png",
+      "side": "pants_side.png"
+    },
+    "boots": {
+      "zOrder": 10,
+      "placeholder": "white",
+      "front": "boots_front.png",
+      "side": "boots_side.png"
+    },
+    "body": {
+      "zOrder": 5,
+      "placeholder": "white",
+      "front": "body_front.png",
+      "side": "body_side.png"
+    }
+  }
+}

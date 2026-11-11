@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(FlipBookGenerator VERSION 0.9.1 LANGUAGES CXX)
+project(FlipBookGenerator VERSION 0.9.2 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -53,6 +53,7 @@ add_library(flipbook_core STATIC
     src/core/align.cpp
     src/core/json_min.cpp
     src/core/template_spec.cpp
+    src/core/backinfer.cpp
 )
 target_link_libraries(flipbook_core ${OPENCV_MINIMAL_LIBS})
 
@@ -209,6 +210,21 @@ add_test(
 add_test(
     NAME parts_library
     COMMAND flipbook --parts-library-gate
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+# Back-view inference gate (v0.9.2). Synthetic self-checks are the hard rule
+# (exact mirror, face covered, edge outline kept, interior eaten, flatten
+# swaps, alpha invariant); the reference comparison asserts the symmetric crown
+# band byte-exact and reports — not fails — the hand-drawn deviations.
+# 背面推断闸门（v0.9.2）。合成自证是硬规则（精确镜像、脸被盖住、边缘描边保留、
+# 内部吃掉、flatten 换色、alpha 不变量）；参考对照断言对称冠区逐字节一致，
+# 与手绘的偏差如实报告不失败。
+add_test(
+    NAME backinfer
+    COMMAND flipbook --backinfer-gate
+            --templates ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates
+            --assets ${CMAKE_CURRENT_SOURCE_DIR}/assets
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 

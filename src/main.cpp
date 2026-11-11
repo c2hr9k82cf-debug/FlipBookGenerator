@@ -14,6 +14,7 @@
 
 #include "version.h"
 #include "core/align.h"
+#include "core/backinfer.h"
 #include "core/core.h"
 #include "core/parts.h"
 #include "core/parts_library.h"
@@ -134,6 +135,16 @@ void printCliUsage() {
         "      部件库闸门（v0.9.1）：加载合成库，再验证已知坏形态全部被拒绝\n"
         "      （缺文件、坏 json、槽位不符、尺寸错、背面歧义、roleColors 坏……）。\n"
         "\n"
+        "  flipbook --backinfer-gate [--templates DIR] [--assets DIR]\n"
+        "      Back-view inference gate (v0.9.2): synthetic self-checks (hair\n"
+        "      mirrors exactly, face covered by the rear hair mass, edge outline\n"
+        "      kept, interior lines eaten, flatten roles swapped), then reference\n"
+        "      comparison (crown rows byte-exact, no face-colour residue, alpha\n"
+        "      invariant; hand-drawn deviations are reported, not failed).\n"
+        "      背面推断闸门（v0.9.2）：合成自检（头发精确镜像、脸被后脑头发盖住、\n"
+        "      边缘描边保留、内部线条吃掉、flatten 角色换色），再对照参考（冠区\n"
+        "      逐字节、无脸色残留、alpha 不变量；与手绘的偏差如实报告不失败）。\n"
+        "\n"
         "  flipbook --fourdir --front F.png --side S.png --back B.png\n"
         "      [--chips DIR] --out DIR\n"
         "      The app pipeline: extract palettes from three template-aligned\n"
@@ -180,6 +191,7 @@ struct CliArgs {
     bool templateLoadGate   = false;
     bool partsSemanticsGate = false;
     bool partsLibraryGate   = false;
+    bool backinferGate      = false;
 };
 
 bool parseArgs(int argc, char** argv, CliArgs& a, std::string& err) {
@@ -235,6 +247,8 @@ bool parseArgs(int argc, char** argv, CliArgs& a, std::string& err) {
             a.partsSemanticsGate = true;
         } else if (s == "--parts-library-gate") {
             a.partsLibraryGate = true;
+        } else if (s == "--backinfer-gate") {
+            a.backinferGate = true;
         } else if (s == "--templates") {
             const char* v = needValue("--templates"); if (!v) return false;
             a.templates = v;
@@ -1286,6 +1300,241 @@ int runPartsLibraryGate(const CliArgs& a) {
     return failures ? 1 : 0;
 }
 
+// Back-inference gate (v0.9.2).
+//  1. Synthetic self-checks: an asymmetric hairstyle must mirror EXACTLY (same
+//     colours at the mirrored positions), the face must vanish under the rear
+//     hair mass, silhouette-edge outline survives while interior lines are
+//     eaten, flatten roles swap to their base colours, and the output alpha
+//     equals the front alpha (the silhouette is the front's — the invariant
+//     that keeps every frame's contour stable).
+//  2. Reference comparison: inferred back vs the hand-drawn back. The crown
+//     band (y2..y4) is symmetric in the reference and must match BYTE-EXACT;
+//     head rows may only contain hair + outline colours; the remaining
+//     differences are REPORTED, not failed — the drawn back hair is its own
+//     artwork (solid rear mass + decorative bands), larger than a plain
+//     mirror, and that deviation is recorded on purpose.
+// 背面推断闸门（v0.9.2）。
+//  1. 合成自证：不对称发型必须精确镜像（镜像位置同色）、脸必须消失在后脑头发下、
+//     剪影边缘 outline 保留而内部线条被吃、flatten 角色换基色、输出 alpha 等于
+//     正面 alpha（轮廓 = 正面轮廓 —— 让每帧外框稳定的不变量）。
+//  2. 参考对照：推断背面 vs 手绘背面。冠区（y2..y4）在参考里对称，必须逐字节一致；
+//     头部行只许出现头发 + 描边色；其余差异只报告不失败 —— 手绘背面头发是独立
+//     创作（实心后脑 + 装饰发带），比纯镜像大，该偏差是刻意记录的。
+int runBackinferGate(const CliArgs& a) {
+    struct Case { const char* json; const char* refBase; };
+    const Case cases[] = {
+        {"chibi_standard.json", "character_32"},
+        {"chibi_alt.json",      "character_alt"},
+    };
+    int failures = 0;
+
+    for (const Case& c : cases) {
+        fb::TemplateSpec spec;
+        std::string err;
+        if (!fb::loadTemplateSpec(a.templates + "/" + c.json, spec, err)) {
+            std::cout << c.json << ": load FAILED: " << err << "   FAIL\n";
+            ++failures;
+            continue;
+        }
+        std::cout << c.json << ":\n";
+
+        cv::Vec3b cHairMid, cHairDark, cOutline, cSkin, cBlush, cWhite, cTeal,
+            cGold, cRed, cMint;
+        const char* need[] = {"hair_mid", "hair_dark", "outline", "skin",
+                              "blush", "white", "teal", "gold", "red", "mint"};
+        cv::Vec3b* dsts[] = {&cHairMid, &cHairDark, &cOutline, &cSkin, &cBlush,
+                             &cWhite, &cTeal, &cGold, &cRed, &cMint};
+        bool palOk = true;
+        for (int i = 0; i < 10; ++i)
+            if (!spec.roleBgr(need[i], *dsts[i])) {
+                std::cout << "  palette missing '" << need[i] << "'   FAIL\n";
+                ++failures;
+                palOk = false;
+            }
+        if (!palOk) continue;
+
+        // ---- 1. synthetic self-checks / 合成自证 ----
+        // Mirror targets are pre-filled with a KEEP colour (mint): the mirror
+        // only lands inside the silhouette, so the target must be opaque for
+        // the mirror write to happen at all — and being a keep role, the
+        // placeholder never enters the mirror layer itself.
+        // 镜像目标先用 keep 角色色（mint）占位：镜像只落在轮廓内，目标必须不透明
+        // 镜像写入才会发生 —— 占位是 keep 角色，自身绝不进镜像层。
+        cv::Mat front = cv::Mat::zeros(spec.size, CV_8UC4);
+        auto put = [&](int x, int y, const cv::Vec3b& bgr) {
+            front.at<cv::Vec4b>(y, x) = cv::Vec4b(bgr[0], bgr[1], bgr[2], 255);
+        };
+        // Asymmetric hair: x -> w-1-x. Targets (19,5)/(18,5) pre-filled.
+        // 不对称头发：x -> w-1-x。目标 (19,5)/(18,5) 先占位。
+        put(12, 5, cHairMid);    put(19, 5, cMint);
+        put(13, 5, cHairDark);   put(18, 5, cMint);
+        // Face pixel on the head — must be covered by the rear hair mass. Its
+        // mirror target (16,8) is left EMPTY: skin never mirrors, and empty
+        // stays empty (alpha invariant).
+        // 头部行的脸色像素 —— 必须被后脑头发盖住。镜像目标 (16,8) 故意留空：
+        // skin 不镜像，空的保持空（alpha 不变量）。
+        put(15, 8, cSkin);
+        // hair_highlight vs gold disambiguation: same RGB, head row mirrors.
+        // hair_highlight 与 gold 消歧：同 RGB，头部行镜像。
+        put(14, 3, cGold);       put(17, 3, cMint);
+        // Silhouette-edge outline survives — AND the mirror must not paint
+        // over it: (21,10) is hair, its mirror lands exactly on (10,10).
+        // 剪影边缘 outline 保留 —— 而且镜像不得盖它：(21,10) 是头发，它的镜像
+        // 正好落在 (10,10)。
+        put(10, 10, cOutline);
+        put(21, 10, cHairDark);
+        put(15, 10, cOutline);
+        // Interior outline (all 4 neighbours opaque) is eaten.
+        // 内部 outline（四邻皆不透明）被吃。
+        put(15, 11, cOutline);
+        put(14, 11, cSkin);
+        put(16, 11, cSkin);
+        put(15, 12, cSkin);
+        // Body rows: gold/red buttons flatten to mint, blush to skin, mint
+        // passes through. The same RGB gold here is 'gold', not hair_highlight.
+        // 躯干行：金/红扣子压平为 mint，blush 压平为 skin，mint 照搬。
+        // 这里的同色 gold 是 gold 而非 hair_highlight。
+        put(12, 15, cGold);
+        put(13, 15, cRed);
+        put(14, 15, cBlush);
+        put(15, 15, cMint);
+
+        cv::Mat out = fb::inferBackView(front, cv::Mat(), spec, err);
+        if (out.empty()) {
+            std::cout << "  synthetic: infer FAILED: " << err << "   FAIL\n";
+            ++failures;
+            continue;
+        }
+
+        struct PxCheck { int x, y; cv::Vec3b want; const char* what; };
+        const PxCheck pxc[] = {
+            {19, 5,  cHairMid,  "hair_mid mirrored exactly to (19,5)"},
+            {18, 5,  cHairDark, "hair_dark mirrored exactly to (18,5)"},
+            {12, 5,  cHairMid,  "origin becomes hair base (12,5)"},
+            {13, 5,  cHairMid,  "origin becomes hair base (13,5)"},
+            {15, 8,  cHairMid,  "face covered by rear hair (15,8)"},
+            {17, 3,  cGold,     "head-row gold mirrors as hair_highlight (17,3)"},
+            {14, 3,  cHairMid,  "origin of head-row gold becomes hair base"},
+            {10, 10, cOutline,  "mirror does not paint over kept contour (10,10)"},
+            {21, 10, cHairMid,  "hair origin becomes hair base (21,10)"},
+            {15, 10, cOutline,  "silhouette-edge outline kept (15,10)"},
+            {15, 11, cHairMid,  "interior outline eaten (15,11)"},
+            {12, 15, cMint,     "body gold flattened to mint (12,15)"},
+            {13, 15, cMint,     "body red flattened to mint (13,15)"},
+            {14, 15, cSkin,     "blush flattened to skin (14,15)"},
+            {15, 15, cMint,     "mint passes through (15,15)"},
+        };
+        for (const PxCheck& p : pxc) {
+            const cv::Vec4b got = out.at<cv::Vec4b>(p.y, p.x);
+            if (got != cv::Vec4b(p.want[0], p.want[1], p.want[2], 255)) {
+                std::cout << "  synthetic: " << p.what << " got ("
+                          << int(got[0]) << "," << int(got[1]) << ","
+                          << int(got[2]) << ")   FAIL\n";
+                ++failures;
+            }
+        }
+        // Alpha invariant: the silhouette is the front's, pixel for pixel.
+        // alpha 不变量：轮廓 = 正面轮廓，逐像素。
+        bool alphaOk = true;
+        for (int y = 0; y < front.rows && alphaOk; ++y)
+            for (int x = 0; x < front.cols; ++x)
+                if (front.at<cv::Vec4b>(y, x)[3] != out.at<cv::Vec4b>(y, x)[3]) {
+                    std::cout << "  synthetic: alpha differs at (" << x << ","
+                              << y << ")   FAIL\n";
+                    ++failures;
+                    alphaOk = false;
+                    break;
+                }
+        if (alphaOk)
+            std::cout << "  synthetic: 15 pixel checks + alpha invariant   OK\n";
+
+        // ---- 2. reference comparison / 参考对照 ----
+        const std::string frontPath = a.assets + "/" + c.refBase + ".png";
+        const std::string backPath  = a.assets + "/" + c.refBase + "_back.png";
+        const cv::Mat refFront = cv::imread(frontPath, cv::IMREAD_UNCHANGED);
+        const cv::Mat refBack  = cv::imread(backPath, cv::IMREAD_UNCHANGED);
+        if (refFront.empty() || refBack.empty()) {
+            std::cout << "  reference: cannot read " << frontPath << " / "
+                      << backPath << "   FAIL\n";
+            ++failures;
+            continue;
+        }
+        cv::Mat inf = fb::inferBackView(refFront, cv::Mat(), spec, err);
+        if (inf.empty()) {
+            std::cout << "  reference: infer FAILED: " << err << "   FAIL\n";
+            ++failures;
+            continue;
+        }
+
+        // Alpha invariant on the real character too.
+        // 真实角色上也跑 alpha 不变量。
+        bool refAlphaOk = true;
+        for (int y = 0; y < refFront.rows && refAlphaOk; ++y)
+            for (int x = 0; x < refFront.cols; ++x)
+                if (refFront.at<cv::Vec4b>(y, x)[3] != inf.at<cv::Vec4b>(y, x)[3]) {
+                    std::cout << "  reference: alpha differs at (" << x << ","
+                              << y << ")   FAIL\n";
+                    ++failures;
+                    refAlphaOk = false;
+                    break;
+                }
+        if (refAlphaOk) std::cout << "  reference: alpha invariant   OK\n";
+
+        // Crown band y2..y4 is the symmetric region — byte-exact vs drawn.
+        // 冠区 y2..y4 是对称区 —— 与手绘逐字节一致。
+        int crownDiff = 0;
+        for (int y = 2; y <= 4; ++y)
+            for (int x = 0; x < inf.cols; ++x)
+                if (inf.at<cv::Vec4b>(y, x) != refBack.at<cv::Vec4b>(y, x))
+                    ++crownDiff;
+        if (crownDiff != 0) {
+            std::cout << "  reference: crown band y2-4 differs (" << crownDiff
+                      << " px)   FAIL\n";
+            ++failures;
+        } else {
+            std::cout << "  reference: crown band y2-4 byte-exact   OK\n";
+        }
+
+        // Head rows may only hold hair + outline (face colours would mean the
+        // rear hair mass failed to cover the face). Colours keyed as packed
+        // ints (cv::Vec3b has no operator<).
+        // 头部行只许头发 + 描边（出现脸色 = 后脑头发没盖住脸）。颜色作打包整数键
+        // （cv::Vec3b 没有 operator<）。
+        auto keyOf = [](const cv::Vec3b& c) {
+            return (int(c[0]) << 16) | (int(c[1]) << 8) | int(c[2]);
+        };
+        const std::set<int> headAllowed = {
+            keyOf(cHairMid), keyOf(cHairDark),
+            keyOf(cGold) /* hair_highlight shares gold's RGB */,
+            keyOf(cOutline)};
+        int residue = 0;
+        for (int y : spec.views[0].map.headRows) {
+            for (int x = 0; x < inf.cols; ++x) {
+                const cv::Vec4b px = inf.at<cv::Vec4b>(y, x);
+                if (px[3] == 0) continue;
+                if (!headAllowed.count(keyOf(cv::Vec3b(px[0], px[1], px[2])))) {
+                    if (residue < 5)
+                        std::cout << "  reference: non-hair colour at (" << x
+                                  << "," << y << ") in head rows   FAIL\n";
+                    ++residue;
+                    ++failures;
+                }
+            }
+        }
+        if (residue == 0)
+            std::cout << "  reference: head rows are hair + outline only   OK\n";
+
+        // Remaining differences vs the hand-drawn back: reported, not failed.
+        // 与手绘背面的其余差异：如实报告，不失败。
+        const int diff = countPixelDiff(inf, refBack);
+        std::cout << "  reference: inferred vs hand-drawn = " << diff
+                  << " px differ (known deviation: drawn rear hair is its own "
+                     "artwork, larger than a plain mirror)   INFO\n";
+    }
+    std::cout << (failures ? "BACKINFER GATE FAIL\n" : "BACKINFER GATE OK\n");
+    return failures ? 1 : 0;
+}
+
 int runPaletteGate(const CliArgs& a) {
     fb::ChipSet cs;
     std::string err;
@@ -1639,6 +1888,7 @@ int runCli(int argc, char** argv) {
     if (a.templateLoadGate)   return runTemplateLoadGate(a);
     if (a.partsSemanticsGate) return runPartsSemanticsGate(a);
     if (a.partsLibraryGate)   return runPartsLibraryGate(a);
+    if (a.backinferGate)      return runBackinferGate(a);
     if (a.fourdir)     return runFourdir(a);
     if (a.allPresets)  return runPresets(a, {"idle", "walk_side", "walk_front", "walk_up"});
     if (!a.preset.empty()) return runPresets(a, {a.preset});

@@ -63,7 +63,7 @@
     "outline": "keep",
     "hair_mid": "mirror",
     "hair_dark": "mirror",
-    "hair_highlight": "flatten:hair_mid",
+    "hair_highlight": "mirror",
     "skin": "keep",
     "blush": "flatten:skin",
     "tan": "keep",
