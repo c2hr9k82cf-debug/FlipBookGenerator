@@ -16,5 +16,17 @@ namespace ui {
 // 返回 motion_chips/ 目录，找不到则 ""。
 std::string findChipsDir();
 
+// Returns the full path of the character template JSON (chibi_standard.json),
+// or "" if not found. Same search order as findChipsDir.
+// 返回角色模板 JSON（chibi_standard.json）的完整路径，找不到则 ""。
+// 搜索顺序与 findChipsDir 相同。
+std::string findTemplatePath();
+
+// The USER parts library root (created on demand by the callers that write):
+//   ~/Library/Application Support/FlipBookGenerator/parts_library/
+// 用户部件库根目录（写入方按需创建）：
+//   ~/Library/Application Support/FlipBookGenerator/parts_library/
+std::string userLibraryRoot();
+
 }  // namespace ui
 }  // namespace fb

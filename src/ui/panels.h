@@ -2,6 +2,7 @@
 #pragma once
 
 #include "app_state.h"
+#include "canvas.h"
 
 namespace fb {
 namespace ui {
@@ -16,15 +17,19 @@ struct PreviewTextures {
     unsigned int slotDiff[3] = {0, 0, 0};   // transparent diff marks / 透明差异标记
     unsigned int sheet = 0;
     unsigned long uploadedRevision = ~0ul;
+    // The part editor's pixel canvas (v0.10.0) — same GL lifetime as above.
+    // 部件编辑器的像素画布（v0.10.0）—— GL 生命周期同上。
+    PixelCanvas editorCanvas;
 
     void sync(AppState& st);
     void release();
     ~PreviewTextures() { release(); }
 };
 
-// Draw the whole window content: input slots, extraction, preview, status,
-// export. Called inside ImGui::Begin("FlipBookGenerator").
-// 画整个窗口内容：输入槽、提取结果、预览、状态、导出。在 ImGui::Begin 内调用。
+// Draw the whole window content: mode tabs (animation export / part editor),
+// status bar. Called inside ImGui::Begin("##main").
+// 画整个窗口内容：模式 tab（动画导出 / 部件编辑器）、状态栏。在
+// ImGui::Begin("##main") 内调用。
 void drawMainContent(AppState& st, PreviewTextures& tex);
 
 }  // namespace ui

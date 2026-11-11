@@ -16,6 +16,7 @@
 #include "core/align.h"
 #include "core/backinfer.h"
 #include "core/core.h"
+#include "core/part_editor.h"
 #include "core/parts.h"
 #include "core/parts_library.h"
 #include "core/template_spec.h"
@@ -145,6 +146,16 @@ void printCliUsage() {
         "      边缘描边保留、内部线条吃掉、flatten 角色换色），再对照参考（冠区\n"
         "      逐字节、无脸色残留、alpha 不变量；与手绘的偏差如实报告不失败）。\n"
         "\n"
+        "  flipbook --fill-gate [--templates DIR] [--assets DIR]\n"
+        "      Part-editor fill gate (v0.10.0): blank template -> in-tool fill ->\n"
+        "      legal library item. Blank interior recolours exactly (outline\n"
+        "      untouched), brush/eraser/one-step-undo round-trip byte-exact,\n"
+        "      inferred back keeps the alpha invariant and the role constraint,\n"
+        "      save -> load returns byte-identical views.\n"
+        "      部件编辑器填色闸门（v0.10.0）：空白模板 -> 工具内填色 -> 合法库物品。\n"
+        "      空白内部精确换色（描边不动）、画笔/橡皮/单步撤销逐字节往返、推断背面\n"
+        "      保持 alpha 不变量与角色约束、存库 -> 读回逐字节一致。\n"
+        "\n"
         "  flipbook --fourdir --front F.png --side S.png --back B.png\n"
         "      [--chips DIR] --out DIR\n"
         "      The app pipeline: extract palettes from three template-aligned\n"
@@ -192,6 +203,7 @@ struct CliArgs {
     bool partsSemanticsGate = false;
     bool partsLibraryGate   = false;
     bool backinferGate      = false;
+    bool fillGate           = false;
 };
 
 bool parseArgs(int argc, char** argv, CliArgs& a, std::string& err) {
@@ -249,6 +261,8 @@ bool parseArgs(int argc, char** argv, CliArgs& a, std::string& err) {
             a.partsLibraryGate = true;
         } else if (s == "--backinfer-gate") {
             a.backinferGate = true;
+        } else if (s == "--fill-gate") {
+            a.fillGate = true;
         } else if (s == "--templates") {
             const char* v = needValue("--templates"); if (!v) return false;
             a.templates = v;
@@ -1535,6 +1549,255 @@ int runBackinferGate(const CliArgs& a) {
     return failures ? 1 : 0;
 }
 
+// Part-editor fill gate (v0.10.0) — the in-tool fill loop:
+//   blank template -> fill/brush -> role constraint -> library round trip.
+// The engine under fillRole is applyPaletteRoles (already gated exact);
+// what this gate adds is the EDITOR semantics around it: outline survives a
+// fill, undo restores byte-exact, an inferred back obeys the alpha invariant
+// and the role constraint, and save -> load returns identical views.
+// 部件编辑器填色闸门（v0.10.0）—— 工具内填色闭环：
+//   空白模板 -> 填色/画笔 -> 角色约束 -> 库往返。
+// fillRole 底下的引擎是 applyPaletteRoles（已闸门覆盖其精确语义）；本闸门补的是
+// 环绕它的编辑器语义：填色不动描边、撤销逐字节恢复、推断背面守 alpha 不变量与
+// 角色约束、存库 -> 读回视图一致。
+int runFillGate(const CliArgs& a) {
+    int failures = 0;
+    std::string err;
+    fb::TemplateSpec spec;
+    if (!fb::loadTemplateSpec(a.templates + "/chibi_standard.json", spec, err)) {
+        std::cout << "template load FAILED: " << err << "   FAIL\n";
+        return 1;
+    }
+    cv::Vec3b cWhite, cOutline, cHairMid, cHairDark, cSkin;
+    const struct { const char* role; cv::Vec3b* dst; } need[] = {
+        {"white", &cWhite}, {"outline", &cOutline}, {"hair_mid", &cHairMid},
+        {"hair_dark", &cHairDark}, {"skin", &cSkin},
+    };
+    for (const auto& n : need)
+        if (!spec.roleBgr(n.role, *n.dst)) {
+            std::cout << "palette missing '" << n.role << "'   FAIL\n";
+            return 1;
+        }
+
+    auto countCol = [](const cv::Mat& img, const cv::Vec3b& c) {
+        int n = 0;
+        for (int y = 0; y < img.rows; ++y)
+            for (int x = 0; x < img.cols; ++x) {
+                const cv::Vec4b p = img.at<cv::Vec4b>(y, x);
+                if (p[3] && p[0] == c[0] && p[1] == c[1] && p[2] == c[2]) ++n;
+            }
+        return n;
+    };
+    auto sameAlpha = [](const cv::Mat& x, const cv::Mat& y) {
+        for (int r = 0; r < x.rows; ++r)
+            for (int c = 0; c < x.cols; ++c)
+                if (x.at<cv::Vec4b>(r, c)[3] != y.at<cv::Vec4b>(r, c)[3])
+                    return false;
+        return true;
+    };
+    auto px = [](const cv::Mat& img, int x, int y) {
+        return img.at<cv::Vec4b>(y, x);
+    };
+
+    // ---- 1. blank -> fill: exact recolour, outline untouched ----
+    // ---- 1. 空白 -> 填色：精确换色，描边不动 ----
+    {
+        const cv::Mat blank = cv::imread(a.assets + "/parts/_blank/hair_front.png",
+                                         cv::IMREAD_UNCHANGED);
+        if (blank.empty() || blank.type() != CV_8UC4) {
+            std::cout << "blank hair_front.png unreadable   FAIL\n";
+            ++failures;
+        } else {
+            const int nWhite = countCol(blank, cWhite);
+            const int nOutline = countCol(blank, cOutline);
+            fb::PartEditor ed;
+            ed.blank(spec.size);
+            ed.pixels[0] = blank.clone();
+            ed.fillRole(0, cWhite, cHairMid);
+            const cv::Mat& got = ed.pixels[0];
+            bool ok = true;
+            if (countCol(got, cWhite) != 0) {
+                std::cout << "  fill: white residue after fill   FAIL\n";
+                ++failures; ok = false;
+            }
+            if (countCol(got, cOutline) != nOutline) {
+                std::cout << "  fill: outline count changed   FAIL\n";
+                ++failures; ok = false;
+            }
+            if (countCol(got, cHairMid) != nWhite) {
+                std::cout << "  fill: interior did not recolour 1:1   FAIL\n";
+                ++failures; ok = false;
+            }
+            if (!sameAlpha(blank, got)) {
+                std::cout << "  fill: alpha changed by fillRole   FAIL\n";
+                ++failures; ok = false;
+            }
+            const int viol = fb::roleConstraintViolations(got, spec);
+            if (viol != 0) {
+                std::cout << "  fill: " << viol
+                          << " pixels violate the role constraint   FAIL\n";
+                ++failures; ok = false;
+            }
+            if (ok)
+                std::cout << "  fill: recolour exact, outline kept, legal   OK\n";
+        }
+    }
+
+    // ---- 2. brush / eraser / one-step undo ----
+    // ---- 2. 画笔 / 橡皮 / 单步撤销 ----
+    {
+        fb::PartEditor ed;
+        ed.blank(spec.size);
+        ed.paint(fb::PartEditor::FRONT, 5, 5, cHairDark);
+        ed.snapshot();
+        ed.paint(fb::PartEditor::FRONT, 5, 5, cHairMid);
+        ed.paint(fb::PartEditor::FRONT, 7, 3, cSkin);
+        ed.erase(fb::PartEditor::FRONT, 5, 5);
+        ed.paint(fb::PartEditor::FRONT, -1, 99, cSkin);   // ignored / 越界忽略
+        ed.undo();
+        bool ok = true;
+        if (px(ed.pixels[0], 5, 5) != cv::Vec4b(cHairDark[0], cHairDark[1], cHairDark[2], 255)) {
+            std::cout << "  undo: (5,5) not restored to the snapshot   FAIL\n";
+            ++failures; ok = false;
+        }
+        if (px(ed.pixels[0], 7, 3)[3] != 0) {
+            std::cout << "  undo: (7,3) paint survived undo   FAIL\n";
+            ++failures; ok = false;
+        }
+        ed.erase(fb::PartEditor::FRONT, 5, 5);
+        if (px(ed.pixels[0], 5, 5)[3] != 0) {
+            std::cout << "  eraser: (5,5) not transparent   FAIL\n";
+            ++failures; ok = false;
+        }
+        if (ok) std::cout << "  brush/eraser/undo round-trip byte-exact   OK\n";
+    }
+
+    // ---- 3. inferred back: alpha invariant + role constraint ----
+    // ---- 3. 推断背面：alpha 不变量 + 角色约束 ----
+    {
+        const cv::Mat refFront = cv::imread(a.assets + "/character_32.png",
+                                            cv::IMREAD_UNCHANGED);
+        fb::PartEditor ed;
+        ed.blank(spec.size);
+        if (refFront.empty()) {
+            std::cout << "  back: cannot read character_32.png   FAIL\n";
+            ++failures;
+        } else {
+            ed.pixels[0] = refFront.clone();
+            if (!ed.inferBack(spec, err)) {
+                std::cout << "  back: infer FAILED: " << err << "   FAIL\n";
+                ++failures;
+            } else {
+                bool ok = true;
+                if (!sameAlpha(ed.pixels[0], ed.pixels[2])) {
+                    std::cout << "  back: alpha invariant broken   FAIL\n";
+                    ++failures; ok = false;
+                }
+                const int viol = fb::roleConstraintViolations(ed.pixels[2], spec);
+                if (viol != 0) {
+                    std::cout << "  back: " << viol
+                              << " pixels violate the role constraint   FAIL\n";
+                    ++failures; ok = false;
+                }
+                if (ok) std::cout << "  back: alpha invariant + legal colours   OK\n";
+            }
+        }
+    }
+
+    // ---- 4. save -> load round trip (auto back and file back) ----
+    // ---- 4. 存库 -> 读回往返（auto 与 file 两种背面） ----
+    {
+        namespace fs = std::filesystem;
+        const fs::path lib = fs::temp_directory_path() / "flipbook_fill_gate_lib";
+        std::error_code ec;
+        fs::remove_all(lib, ec);
+
+        fb::PartEditor ed;
+        ed.blank(spec.size);
+        ed.itemName = "roundtrip_test";
+        ed.slot = "hair";
+        const cv::Mat rf = cv::imread(a.assets + "/character_32.png", cv::IMREAD_UNCHANGED);
+        const cv::Mat rs = cv::imread(a.assets + "/character_32_side.png", cv::IMREAD_UNCHANGED);
+        ed.pixels[0] = rf.clone();
+        ed.pixels[1] = rs.clone();
+
+        bool ok = true;
+        if (!fb::saveEditorItem(ed, lib.string(), err)) {
+            std::cout << "  save: FAILED: " << err << "   FAIL\n";
+            ++failures; ok = false;
+        } else if (fs::exists(lib / "hair/roundtrip_test/back.png")) {
+            std::cout << "  save: back.png written although back is un-drawn   FAIL\n";
+            ++failures; ok = false;
+        } else {
+            fb::PartEditor ed2;
+            if (!fb::loadEditorItem(ed2, (lib / "hair/roundtrip_test").string(),
+                                    "hair", spec.size, err)) {
+                std::cout << "  load: FAILED: " << err << "   FAIL\n";
+                ++failures; ok = false;
+            } else {
+                if (countPixelDiff(ed2.pixels[0], ed.pixels[0]) != 0 ||
+                    countPixelDiff(ed2.pixels[1], ed.pixels[1]) != 0) {
+                    std::cout << "  save->load: views not byte-identical   FAIL\n";
+                    ++failures; ok = false;
+                }
+                if (!ed2.pixels[2].empty()) {
+                    std::cout << "  save->load: back appeared from nowhere   FAIL\n";
+                    ++failures; ok = false;
+                }
+            }
+        }
+        // Now with an inferred back (item.json must flip to back:"file").
+        // 再带推断背面存一次（item.json 必须翻成 back:"file"）。
+        if (ok && ed.inferBack(spec, err) &&
+            fb::saveEditorItem(ed, lib.string(), err)) {
+            if (!fs::exists(lib / "hair/roundtrip_test/back.png")) {
+                std::cout << "  save: back.png missing although back is drawn   FAIL\n";
+                ++failures; ok = false;
+            } else {
+                fb::PartEditor ed3;
+                if (!fb::loadEditorItem(ed3, (lib / "hair/roundtrip_test").string(),
+                                        "hair", spec.size, err) ||
+                    countPixelDiff(ed3.pixels[2], ed.pixels[2]) != 0) {
+                    std::cout << "  save->load: back not byte-identical   FAIL\n";
+                    ++failures; ok = false;
+                }
+            }
+        } else if (ok) {
+            std::cout << "  save(with back): FAILED: " << err << "   FAIL\n";
+            ++failures; ok = false;
+        }
+        // Name validation. / 名称校验。
+        ed.itemName = "bad/name";
+        if (fb::saveEditorItem(ed, lib.string(), err)) {
+            std::cout << "  save: slash name accepted   FAIL\n";
+            ++failures; ok = false;
+        }
+        fs::remove_all(lib, ec);
+        if (ok) std::cout << "  save->load round trip + name rules   OK\n";
+    }
+
+    // ---- 5. every blank template is legal as-is (white + outline roles) ----
+    // ---- 5. 每张空白模板原样即合法（white + outline 都是角色色） ----
+    {
+        const char* slots[6] = {"hair", "face", "top", "pants", "boots", "body"};
+        const char* views[2] = {"front", "side"};
+        int bad = 0;
+        for (const char* s : slots)
+            for (const char* v : views) {
+                const std::string p = a.assets + "/parts/_blank/" + s + "_" + v + ".png";
+                const cv::Mat img = cv::imread(p, cv::IMREAD_UNCHANGED);
+                if (img.empty() || fb::roleConstraintViolations(img, spec) != 0) {
+                    std::cout << "  blank: " << p << " illegal   FAIL\n";
+                    ++bad; ++failures;
+                }
+            }
+        if (!bad) std::cout << "  blank: 12 templates legal (fill-ready)   OK\n";
+    }
+
+    std::cout << (failures ? "FILL GATE FAIL\n" : "FILL GATE OK\n");
+    return failures ? 1 : 0;
+}
+
 int runPaletteGate(const CliArgs& a) {
     fb::ChipSet cs;
     std::string err;
@@ -1889,6 +2152,7 @@ int runCli(int argc, char** argv) {
     if (a.partsSemanticsGate) return runPartsSemanticsGate(a);
     if (a.partsLibraryGate)   return runPartsLibraryGate(a);
     if (a.backinferGate)      return runBackinferGate(a);
+    if (a.fillGate)           return runFillGate(a);
     if (a.fourdir)     return runFourdir(a);
     if (a.allPresets)  return runPresets(a, {"idle", "walk_side", "walk_front", "walk_up"});
     if (!a.preset.empty()) return runPresets(a, {a.preset});

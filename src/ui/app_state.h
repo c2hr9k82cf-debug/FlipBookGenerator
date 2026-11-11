@@ -9,6 +9,8 @@
 
 #include "core/align.h"
 #include "core/core.h"
+#include "core/part_editor.h"
+#include "core/template_spec.h"
 
 #include <string>
 
@@ -44,6 +46,9 @@ struct ViewSlot {
 class AppState {
 public:
     static constexpr int FRONT = 0, SIDE = 1, BACK = 2;
+    // Which tab is active (0 = animation export, 1 = part editor). Drops are
+    // routed by it. / 当前 tab（0 = 动画导出，1 = 部件编辑器）。拖放按它分派。
+    int mode = 0;
 
     ViewSlot views[3];
 
@@ -92,6 +97,29 @@ public:
 
     // Write the sheet PNG. / 写出大图 PNG。
     bool exportSheet(const std::string& path);
+
+    // ---- part editor (v0.10.0) / 部件编辑器（v0.10.0） ----
+    fb::PartEditor editor;
+    fb::TemplateSpec templateSpec;
+    bool templateReady = false;
+    std::string templateError;
+
+    // Import staging: the raw image + integer alignment params, so the user
+    // can fine-tune after the auto search (P1 engine, same as the view slots).
+    // 导入暂存：原图 + 整数对齐参数，自动搜索后还能微调（P1 引擎，与视图槽同款）。
+    cv::Mat importRaw;
+    fb::AlignParams importAlign;
+    bool hasImport = false;
+
+    // Locate + load the character template once. / 定位并加载一次角色模板。
+    bool ensureTemplate();
+    // Import a PNG into the editor's active view (auto-aligned to the
+    // template silhouette). / 导入 PNG 到编辑器当前视图（对模板剪影自动对齐）。
+    bool editorImport(const std::string& path);
+    // Fine-tune the staged import (scale/offset), re-apply to the view.
+    // 微调暂存导入（缩放/偏移），重新贴到视图。
+    void nudgeImport(int dScale, int dx, int dy);
+    void resetImport();
 };
 
 // Lowercased file name without directory (for front/side/back matching).

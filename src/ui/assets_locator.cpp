@@ -32,6 +32,17 @@ bool tryRoot(const fs::path& root, std::string& out) {
     return false;
 }
 
+// The template JSON lives next to the chips: <assets>/templates/.
+// 模板 JSON 与芯片同区：<assets>/templates/。
+bool tryTemplate(const fs::path& root, std::string& out) {
+    std::error_code ec;
+    for (const fs::path& p : {root / "chibi_standard.json",
+                              root / "templates" / "chibi_standard.json"}) {
+        if (fs::is_regular_file(p, ec)) { out = p.string(); return true; }
+    }
+    return false;
+}
+
 fs::path executableDir() {
 #if defined(__APPLE__)
     char buf[4096];
@@ -70,6 +81,30 @@ std::string findChipsDir() {
     if (tryRoot(fs::current_path() / "assets", found)) return found;
 
     return "";
+}
+
+std::string findTemplatePath() {
+    std::string found;
+
+    if (const char* env = std::getenv("FLIPBOOK_ASSETS")) {
+        if (tryTemplate(env, found)) return found;
+    }
+
+    const fs::path exe = executableDir();
+
+    if (tryTemplate(exe / ".." / "Resources" / "assets", found)) return found;
+    if (tryTemplate(exe / ".." / ".." / "assets", found)) return found;
+    if (tryTemplate(exe / "assets", found)) return found;
+    if (tryTemplate(fs::current_path() / "assets", found)) return found;
+
+    return "";
+}
+
+std::string userLibraryRoot() {
+    const char* home = std::getenv("HOME");
+    if (!home || !*home) return "";
+    return (fs::path(home) / "Library" / "Application Support" /
+            "FlipBookGenerator" / "parts_library").string();
 }
 
 }  // namespace ui

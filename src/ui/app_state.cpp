@@ -225,9 +225,84 @@ bool AppState::exportSheet(const std::string& path) {
     return true;
 }
 
+bool AppState::ensureTemplate() {
+    if (templateReady) return true;
+    templateError.clear();
+    static std::string cachedPath;   // resolved once / 只解析一次
+    if (cachedPath.empty()) cachedPath = findTemplatePath();
+    if (cachedPath.empty()) {
+        templateError =
+            "找不到角色模板（chibi_standard.json）。请设置 FLIPBOOK_ASSETS，"
+            "或在项目根目录运行。";
+        status = templateError;
+        return false;
+    }
+    if (!fb::loadTemplateSpec(cachedPath, templateSpec, templateError)) {
+        status = templateError;
+        return false;
+    }
+    templateReady = true;
+    return true;
+}
+
+bool AppState::editorImport(const std::string& path) {
+    cv::Mat img;
+    if (!fb::loadImageBgra(path, img)) {
+        status = "无法加载图片：" + path;
+        return false;
+    }
+    if (!ensureTemplate()) return false;
+    importRaw = img;
+    importAlign = fb::AlignParams{};
+    hasImport = true;
+    // Auto-search against this view's reference silhouette (template coords).
+    // 对本视图参考剪影自动搜索（模板坐标）。
+    const cv::Mat ref = fb::renderTemplateView(templateSpec, editor.view,
+                                               templateError);
+    if (!ref.empty()) fb::autoAlign(img, ref, importAlign);
+    resetImport();
+    status = "已导入：" + path + " —— 可用微调按钮修正后入库。";
+    return true;
+}
+
+void AppState::nudgeImport(int dScale, int dx, int dy) {
+    if (!hasImport) return;
+    importAlign.scale = std::max(1, std::min(4, importAlign.scale + dScale));
+    importAlign.dx += dx;
+    importAlign.dy += dy;
+    resetImport();
+}
+
+void AppState::resetImport() {
+    if (!hasImport) return;
+    // Re-apply the raw image with the current integer params (nearest
+    // neighbour, rounded translation — the pixel-art rules live in align.cpp).
+    // 用当前整数参数重贴原图（最近邻、平移取整 —— 像素风规则在 align.cpp 里）。
+    editor.ensureCanvas(editor.view);
+    editor.pixels[editor.view] =
+        fb::applyAlign(importRaw, importAlign, editor.canvas);
+    editor.touched[editor.view] = true;
+    ++revision;
+}
+
 int assignDrops(AppState& st, const std::vector<std::string>& paths) {
     int assigned = 0;
     for (const std::string& p : paths) {
+        // Editor tab: drops go to the part editor's views (same front/side/
+        // back name matching), not to the animation slots.
+        // 编辑器 tab：拖入进部件编辑器的视图（同样按 front/side/back 匹配），
+        // 不进动画槽。
+        if (st.mode == 1) {
+            const std::string name = baseNameLower(p);
+            if (name.find("side") != std::string::npos)
+                st.editor.setView(fb::PartEditor::SIDE);
+            else if (name.find("back") != std::string::npos)
+                st.editor.setView(fb::PartEditor::BACK);
+            else if (name.find("front") != std::string::npos)
+                st.editor.setView(fb::PartEditor::FRONT);
+            if (st.editorImport(p)) ++assigned;
+            continue;
+        }
         const std::string name = baseNameLower(p);
         int target = -1;
         if (name.find("front") != std::string::npos)      target = AppState::FRONT;

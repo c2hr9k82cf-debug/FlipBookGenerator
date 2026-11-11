@@ -8,6 +8,7 @@
 // 预览是逐行动画播放器（帧率、大小由用户设定）。
 
 #include "panels.h"
+#include "part_editor_panel.h"
 #include "texture.h"
 #include "version.h"
 
@@ -79,6 +80,7 @@ void PreviewTextures::release() {
     deleteTexture(sheet);
     slot[0] = slot[1] = slot[2] = sheet = 0;
     slotDiff[0] = slotDiff[1] = slotDiff[2] = 0;
+    editorCanvas.release();   // same GL lifetime contract / 同一 GL 生命周期契约
 }
 
 void PreviewTextures::sync(AppState& st) {
@@ -109,6 +111,12 @@ void drawMainContent(AppState& st, PreviewTextures& tex) {
     ImGui::SameLine(ImGui::GetWindowWidth() - 110.f);
     drawThemeButton();
     ImGui::Separator();
+
+    // ---- mode tabs (v0.10.0): animation export / part editor ----
+    // 模式 tab（v0.10.0）：动画导出 / 部件编辑器
+    if (ImGui::BeginTabBar("modeTabs")) {
+    if (ImGui::BeginTabItem("动画导出")) {
+    st.mode = 0;
 
     const float kLeftW = 360.f;
     ImGui::BeginChild("left", ImVec2(kLeftW, 0), false);
@@ -379,6 +387,16 @@ void drawMainContent(AppState& st, PreviewTextures& tex) {
         ImGui::TextDisabled("尚无预览 —— 载入三张视图后自动开播");
     }
     ImGui::EndChild();
+    ImGui::EndTabItem();
+    }
+
+    if (ImGui::BeginTabItem("部件编辑器")) {
+    st.mode = 1;
+    drawPartEditor(st, tex);
+    ImGui::EndTabItem();
+    }
+    ImGui::EndTabBar();
+    }
 
     // ---- status bar ----
     // 状态栏

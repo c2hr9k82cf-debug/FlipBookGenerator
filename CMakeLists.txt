@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(FlipBookGenerator VERSION 0.9.2 LANGUAGES CXX)
+project(FlipBookGenerator VERSION 0.10.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -54,6 +54,7 @@ add_library(flipbook_core STATIC
     src/core/json_min.cpp
     src/core/template_spec.cpp
     src/core/backinfer.cpp
+    src/core/part_editor.cpp
 )
 target_link_libraries(flipbook_core ${OPENCV_MINIMAL_LIBS})
 
@@ -228,6 +229,18 @@ add_test(
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
+# Part-editor fill gate (v0.10.0): the in-tool fill loop end to end —
+# blank template -> fill/brush/undo -> role constraint -> library round trip.
+# 部件编辑器填色闸门（v0.10.0）：工具内填色闭环到底 —— 空白模板 -> 填色/画笔/
+# 撤销 -> 角色约束 -> 库往返。
+add_test(
+    NAME fill
+    COMMAND flipbook --fill-gate
+            --templates ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates
+            --assets ${CMAKE_CURRENT_SOURCE_DIR}/assets
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
 # ---------------------------------------------------------------------------
 # GUI (macOS desktop app) / GUI（macOS 桌面应用）
 #
@@ -317,6 +330,8 @@ if(FLIPBOOK_BUILD_GUI)
     add_executable(flipbook_gui
         src/ui/main.cpp
         src/ui/panels.cpp
+        src/ui/part_editor_panel.cpp
+        src/ui/canvas.cpp
         src/ui/app_state.cpp
         src/ui/assets_locator.cpp
         src/ui/texture.cpp
