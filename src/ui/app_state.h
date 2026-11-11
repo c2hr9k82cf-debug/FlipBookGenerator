@@ -38,6 +38,7 @@ public:
     fb::FourDirResult result;
     bool hasResult = false;
     std::string pipelineError;   // extraction/pipeline message / 提取与管线错误
+    std::string pipelineWarning; // non-fatal (e.g. tolerated mask diff) / 非致命提醒
 
     // Status bar text / 状态栏文本
     std::string status = "拖入三张模板对齐视图（正面 / 侧面 / 背面）以开始。";

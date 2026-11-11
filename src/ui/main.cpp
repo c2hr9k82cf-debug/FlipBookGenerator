@@ -90,9 +90,13 @@ int main() {
         for (const char* fp : kFontCandidates) {
             if (std::FILE* f = std::fopen(fp, "rb")) {
                 std::fclose(f);
+                // ChineseFull, not ChineseSimplifiedCommon: the "common" table
+                // lacks glyphs like 帧 (rendered as '?'), and any future UI text
+                // would hit the same hole.
+                // 用全 CJK 而非常用字表：常用字表缺「帧」等字（显示成 '?'），
+                // 以后任何文案都会踩同一个坑。
                 io.Fonts->AddFontFromFileTTF(
-                    fp, 18.0f, nullptr,
-                    io.Fonts->GetGlyphRangesChineseSimplifiedCommon());
+                    fp, 18.0f, nullptr, io.Fonts->GetGlyphRangesChineseFull());
                 break;
             }
         }
@@ -121,6 +125,10 @@ int main() {
             ok = st.exportSheet(parts[3]);
         }
         std::printf("AUTOTEST: %s — %s\n", ok ? "PASS" : "FAIL", st.status.c_str());
+        // Surface the tolerated-mask warning too, so headless runs can see it.
+        // 顺带打印宽容模式的剪影警告，无头运行也能看见。
+        if (!st.pipelineWarning.empty())
+            std::printf("AUTOTEST-WARN: %s\n", st.pipelineWarning.c_str());
         std::fflush(stdout);
         tex.release();
         ImGui_ImplOpenGL3_Shutdown();

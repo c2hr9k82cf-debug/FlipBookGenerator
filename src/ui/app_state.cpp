@@ -70,6 +70,7 @@ void AppState::clearAll() {
     result = fb::FourDirResult{};
     hasResult = false;
     pipelineError.clear();
+    pipelineWarning.clear();
     ++revision;
     status = "已清空 —— 拖入三张模板对齐视图重新开始。";
 }
@@ -77,6 +78,7 @@ void AppState::clearAll() {
 bool AppState::runPipeline() {
     hasResult = false;
     pipelineError.clear();
+    pipelineWarning.clear();
     ++revision;
 
     // Not all views in yet: idle, not an error. / 三视图未齐：静默，不算错误。
@@ -90,15 +92,33 @@ bool AppState::runPipeline() {
 
     if (!ensureChips()) return false;
 
+    // Tolerant mode: a silhouette mismatch warns instead of rejecting (the
+    // sheet's shape comes from the chips; stray pixels cost nothing).
+    // 宽容模式：剪影不齐只提醒、不拒绝（大图形状来自芯片；杂散像素无伤大雅）。
+    fb::ExtractStats stats[3];
     std::string err;
     if (!fb::buildFourDirSheet(views[FRONT].image, views[SIDE].image,
-                               views[BACK].image, chips, result, err)) {
+                               views[BACK].image, chips, result, err,
+                               stats, /*tolerantMask=*/true)) {
         result = fb::FourDirResult{};
         pipelineError = err;
         status = "管线失败：" + err;
         return false;
     }
     hasResult = true;
+
+    const char* viewNames[3] = {"正面", "侧面", "背面"};
+    std::string warn;
+    for (int v = 0; v < 3; ++v) {
+        if (stats[v].maskDiffPixels > 0) {
+            if (!warn.empty()) warn += " ";
+            warn += std::string(viewNames[v]) + "：剪影与模板差 " +
+                    std::to_string(stats[v].maskDiffPixels) +
+                    " 像素（已忽略差异继续；输出形状仍按模板）。";
+        }
+    }
+    pipelineWarning = warn;
+
     status = "大图就绪：" + std::to_string(result.sheet.cols) + "x" +
              std::to_string(result.sheet.rows) + "（" +
              std::to_string(fb::SHEET_ROWS) + " 行 x " +

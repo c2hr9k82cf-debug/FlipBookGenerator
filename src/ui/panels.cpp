@@ -14,6 +14,7 @@
 #include "imgui.h"
 #include "portable-file-dialogs.h"
 
+#include <cmath>
 #include <string>
 
 namespace fb {
@@ -152,6 +153,12 @@ void drawMainContent(AppState& st, PreviewTextures& tex) {
             ImGui::TextWrapped("%s", st.pipelineError.c_str());
             ImGui::PopStyleColor();
         } else if (st.hasResult) {
+            if (!st.pipelineWarning.empty()) {
+                // Yellow: tolerated, not fatal. / 黄色：已容忍，非致命。
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.f, 0.8f, 0.2f, 1.f));
+                ImGui::TextWrapped("%s", st.pipelineWarning.c_str());
+                ImGui::PopStyleColor();
+            }
             for (int v = 0; v < 3; ++v) {
                 ImGui::Text("%s：%d 种颜色", kViewNames[v],
                             (int)st.result.maps[v].size());
@@ -235,6 +242,54 @@ void drawMainContent(AppState& st, PreviewTextures& tex) {
         // 行走走完整循环。
         const int frame = ((int)(clockTime * (float)fps) % fb::SHEET_COLS +
                            fb::SHEET_COLS) % fb::SHEET_COLS;
+
+        // ---- walk demo stage: up a while, then down, on a gently scrolling
+        // ground so the direction switch reads clearly ----
+        // ---- 走动演示舞台：朝上走一段再朝下走，地面轻度滚动，方向切换一目了然 ----
+        {
+            ImGui::Spacing();
+            ImGui::TextUnformatted("走动演示（上走 → 下走 循环）");
+            const float stageH = 224.f;
+            const float stageW = ImGui::GetContentRegionAvail().x;
+            const ImVec2 pos = ImGui::GetCursorScreenPos();
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            const ImU32 ground   = IM_COL32(38, 42, 52, 255);
+            const ImU32 stripe   = IM_COL32(52, 58, 72, 255);
+            const ImU32 horizon  = IM_COL32(24, 27, 34, 255);
+            dl->AddRectFilled(pos, ImVec2(pos.x + stageW, pos.y + stageH), ground);
+            dl->AddRectFilled(pos, ImVec2(pos.x + stageW, pos.y + stageH * 0.32f), horizon);
+            // Ground stripes scroll to sell "walking": down when the character
+            // walks up, up when it walks down. Speed is deliberately gentle.
+            // 地面条纹滚动营造"走动感"：角色朝上走时条纹下移，朝下走时上移。
+            // 速度刻意轻度。
+            constexpr float kPhaseSec = 3.f;   // seconds per direction / 每方向秒数
+            constexpr float kStripe   = 24.f;  // stripe period in px / 条纹周期
+            constexpr float kSpeed    = 14.f;  // scroll px per second / 每秒滚动像素
+            const bool goingUp = fmodf(clockTime, 2.f * kPhaseSec) < kPhaseSec;
+            const float dirSign = goingUp ? 1.f : -1.f;
+            const float scrollY = fmodf(clockTime * kSpeed, kStripe);
+            for (float y = -kStripe; y < stageH; y += kStripe) {
+                const float yy = pos.y + stageH * 0.32f + y + dirSign * scrollY;
+                dl->AddRectFilled(ImVec2(pos.x, yy),
+                                  ImVec2(pos.x + stageW, yy + kStripe * 0.5f), stripe);
+            }
+            // Character: up_walk row 3 / down_walk row 1 of the sheet.
+            // 角色：大图第 3 行（上走）/ 第 1 行（下走）。
+            const int row = goingUp ? 3 : 1;
+            ImVec2 uv0, uv1;
+            cellUv(st.result, frame, row, uv0, uv1);
+            ImGui::SetCursorScreenPos(
+                ImVec2(pos.x + (stageW - cell) * 0.5f,
+                       pos.y + stageH * 0.55f - cell * 0.5f));
+            ImGui::Image((ImTextureID)(intptr_t)tex.sheet, ImVec2(cell, cell),
+                         uv0, uv1);
+            ImGui::SetCursorScreenPos(ImVec2(pos.x, pos.y + stageH + 4.f));
+            ImGui::TextDisabled("地面滚动方向随转身反转%s",
+                                goingUp ? " · 朝上走" : " · 朝下走");
+        }
+
+        ImGui::Spacing();
+        ImGui::TextUnformatted("逐帧网格");
         // Column headers / 列头
         ImGui::TextDisabled("方向");
         ImGui::SameLine(90.f);

@@ -41,7 +41,8 @@ struct Tally {
 }  // namespace
 
 bool extractPaletteMap(const cv::Mat& userImg, const cv::Mat& refCell,
-                       PaletteMap& out, std::string& err, ExtractStats* stats) {
+                       PaletteMap& out, std::string& err, ExtractStats* stats,
+                       bool tolerant) {
     out.clear();
     if (stats) *stats = ExtractStats{};
 
@@ -88,14 +89,21 @@ bool extractPaletteMap(const cv::Mat& userImg, const cv::Mat& refCell,
     }
 
     if (maskDiff) {
-        std::ostringstream os;
-        os << "extractPaletteMap: alpha mask differs at " << maskDiff
-           << " pixel(s), first at (" << maskExample.x << "," << maskExample.y
-           << ") — silhouette misaligned (input must be template-aligned / "
-           << "剪影不对齐，输入必须模板对齐)";
-        err = os.str();
         if (stats) stats->maskDiffPixels = maskDiff;
-        return false;
+        // Tolerant: the mismatching pixels were skipped above; the output shape
+        // always comes from the chips, so a few stray silhouette pixels cost
+        // nothing but are worth telling the user about (the GUI shows a warning).
+        // 宽容：差异像素已在上面跳过；输出形状永远来自芯片，多出的剪影像素无伤
+        // 大雅，但值得告知用户（GUI 显示警告）。
+        if (!tolerant) {
+            std::ostringstream os;
+            os << "extractPaletteMap: alpha mask differs at " << maskDiff
+               << " pixel(s), first at (" << maskExample.x << "," << maskExample.y
+               << ") — silhouette misaligned (input must be template-aligned / "
+               << "剪影不对齐，输入必须模板对齐)";
+            err = os.str();
+            return false;
+        }
     }
 
     // Function check: one ref colour -> exactly one user colour.
@@ -135,7 +143,7 @@ bool extractPaletteMap(const cv::Mat& userImg, const cv::Mat& refCell,
     if (stats) {
         stats->comparedPixels = compared;
         stats->mappedColours  = (int)out.size();
-        stats->maskDiffPixels = 0;
+        stats->maskDiffPixels = maskDiff;   // 0 in strict mode / 严格模式下为 0
     }
     return true;
 }

@@ -206,9 +206,17 @@ struct ExtractStats {
 // 一致、每个参考色恰好映射到一个用户色（关系必须是函数）。失败时 err 列出冲突色、
 // 计数与示例坐标。按 app 计划：提取只对 idle 第 0 帧做 —— 它覆盖该视图芯片用到的
 // 全部颜色；fourdir 闸门负责常驻盯着回归。
+//
+// tolerant=true downgrades SILHOUETTE mismatch to a warning (stats->maskDiffPixels
+// counts it; mismatching pixels are simply skipped, and the output shape always
+// comes from the chips anyway). Function violations still fail — those make the
+// reskin ambiguous. The GUI offers this as "warn, don't reject"; gates stay strict.
+// tolerant=true 把**剪影**不一致降级为警告（stats->maskDiffPixels 计数；差异像素
+// 直接跳过 —— 反正输出形状永远来自芯片）。函数性冲突仍然失败 —— 那会让换皮有歧义。
+// GUI 用它实现"提醒而不拒绝"；闸门保持严格。
 bool extractPaletteMap(const cv::Mat& userImg, const cv::Mat& refCell,
                        PaletteMap& out, std::string& err,
-                       ExtractStats* stats = nullptr);
+                       ExtractStats* stats = nullptr, bool tolerant = false);
 
 struct Keyframe {
     int  frame = 0;
@@ -374,7 +382,12 @@ struct FourDirResult {
     FourDirRows rows;                  // assembled rows (for tests/preview) / 组装的行
     std::array<PaletteMap, 3> maps;    // extracted maps: front, side, back / 提取的映射
 };
+// stats[3] (optional) receives per-view extraction diagnostics; tolerantMask
+// passes through to extractPaletteMap (warn, don't reject — the GUI's mode).
+// stats[3]（可选）接收各视图的提取诊断；tolerantMask 透传给 extractPaletteMap
+// （提醒而不拒绝 —— GUI 的模式）。
 bool buildFourDirSheet(const cv::Mat& front, const cv::Mat& side, const cv::Mat& back,
-                       const ChipSet& chips, FourDirResult& out, std::string& err);
+                       const ChipSet& chips, FourDirResult& out, std::string& err,
+                       ExtractStats stats[3] = nullptr, bool tolerantMask = false);
 
 }  // namespace fb
