@@ -249,11 +249,21 @@ Non-negotiable. Encode in `src/core/transform.cpp` and never violate in the rend
   / 部件绝不可平移着离开相邻部件。安全动作：`rootX/rootY`（整体动）、`rotateDeg`
   （绕自身关节转，关节钉住）、`scaleY`（从远端缩短，关节钉住）。部件级
   `moveX/moveY` 不安全，预设不用它。关节开 1px 缝是本渲染器最难看的产物。
-- **Amplitude & rounding / 幅度与取整**: a 1px bob flattens — `lround` maps all
-  lerped in-between frames to the same offset. Use ≥2px for any positional
-  amplitude so the wave triangulates cleanly through the pixels (0,-1,-2,-1,...).
-  / 起伏 1px 会被取整压平（所有中间帧落到同一偏移）。位置幅度至少 2px，
+- **Amplitude & rounding / 幅度与取整**: a 1px amplitude flattens *when it is
+  lerped* — `lround` maps every in-between frame to the same offset, so the
+  body stutters between two heights instead of rising and falling. A **lerped**
+  positional amplitude must therefore be ≥2px to triangulate through the
+  pixels. / 起伏 1px *在被插值时*会被取整压平（所有中间帧落到同一偏移），
+  身体在两个高度间抽搐而不是起落。**要插值的**位置幅度必须 ≥2px，
   波形才能在像素上走出干净的三角波。
+  **The exception, and it is now the rule for the presets / 例外，现在是预设的
+  准则**: the reference sheet's `body_offset_y` uses 1px steps and is taken
+  verbatim, so the presets lay **one keyframe per frame** and never interpolate.
+  With nothing lerped, 1px rasterises exactly and the ≥2px floor does not apply.
+  CLAUDE.md used to state the floor unconditionally; that was wrong.
+  / 参考图的 `body_offset_y` 就是 1 像素步进，且被逐字采用，所以预设**每帧一个
+  关键帧**、从不插值。不插值时 1 像素能精确光栅化，≥2px 的下限不适用。
+  CLAUDE.md 从前把它写成无条件规则，那是错的。
 
 ### ⚠️ Quality expectation / 质量预期
 

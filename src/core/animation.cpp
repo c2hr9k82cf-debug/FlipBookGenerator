@@ -100,6 +100,14 @@ float liftScale(const Rig& rig, int partId, float pixels, const PresetParams& sp
 
 // Wrap a set of keyframe poses evenly around the cycle.
 // 把一组关键帧姿势均匀铺在循环上。
+//
+// With poses.size() == frameCount this puts ONE KEYFRAME ON EVERY FRAME, so
+// poseAt() never lerps and every rendered frame is exactly the keyframe that
+// was authored. The presets below rely on that: the reference bob has 1px
+// steps, which lround would flatten if anything were interpolated.
+// poses.size() == frameCount 时【每帧一个关键帧】，poseAt() 从不插值，
+// 渲染出的每帧都精确等于所写的姿势。下面的预设正依赖这一点：参考图的起伏有
+// 1 像素的步进，一旦插值就会被取整压平。
 void spreadKeyframes(Animation& anim, const std::vector<Pose>& poses) {
     const int n = static_cast<int>(poses.size());
     if (n == 0) return;
@@ -121,6 +129,49 @@ void spreadKeyframes(Animation& anim, const std::vector<Pose>& poses) {
 bool tooSmallForRotation(const Rig& rig) {
     return rig.size.width <= 16 || rig.size.height <= 16;
 }
+
+// ---- The reference sheet's own numbers / 参考图自己的数字 --------------------
+//
+// body_offset_y, taken VERBATIM from assets/templates/anim_reference.json and
+// used as the absolute template for the bob. POSITIVE = the character sits
+// LOWER in the frame (y grows downward), which is exactly how the sheet draws
+// it: a walk sinks into its footfalls and vaults up over its stance leg. The
+// presets used to do the opposite — bob up 2px on the pass frames.
+// body_offset_y，逐字取自 assets/templates/anim_reference.json，是起伏的绝对
+// 模板。正值 = 角色在画面中更靠下（y 向下增长），正是参考图的画法：走路沉进落脚、
+// 在支撑腿上方拱起。预设过去反着来 —— 在交叉帧往上抬 2 像素。
+//
+// The 1px steps are safe here even though CLAUDE.md warns against 1px
+// amplitudes. That rule exists to stop lround flattening LERPED in-between
+// frames; these presets lay one keyframe per frame, so nothing is interpolated
+// and every step lands on a real frame and rasterises exactly.
+// 这里的 1 像素步进是安全的，尽管 CLAUDE.md 反对 1 像素幅度。那条规定是为了防止
+// 取整把【插值出来的】中间帧压平；本预设每帧一个关键帧，从不插值，每一步都落在
+// 真实帧上、精确光栅化。
+constexpr float kBobIdle[2]    = {0.f, 1.f};
+constexpr float kBobSide[6]    = {0.f, 1.f, 0.f, 0.f, 1.f, 0.f};
+constexpr float kBobFrontal[6] = {0.f, 1.f, 0.f, 1.f, 2.f, 1.f};
+
+// The leg rhythm the sheet draws, slot by slot: hold each stride for two
+// frames and cut through the pass for one. +1 = left leg forward (side: swung
+// about the hip; front: lifted toward the camera), -1 = mirrored, 0 = pass,
+// both legs under the body. Measured from anim_reference.json walk_front
+// frame_data — the swinging leg's y-range shortens on slots 0/5 (left) and
+// 2/3 (right), both legs plant on slots 1/4 — and cross-checked on walk_side,
+// whose bottom-row x-extent widens on exactly those same slots.
+// 参考图逐槽位画的腿节奏：跨步保持两帧，交叉切过一帧。+1 = 左腿在前（侧面：绕胯
+// 摆；正面：抬向镜头），-1 = 镜像，0 = 交叉，双腿在身下。由 anim_reference.json
+// walk_front frame_data 实测 —— 摆动腿的 y 范围在槽 0/5（左）和 2/3（右）变短，
+// 槽 1/4 双腿着地 —— 并用 walk_side 交叉核对，它底部行的 x 宽度恰好在同样槽位变宽。
+constexpr float kSwingWalk[6]  = {+1.f, 0.f, -1.f, -1.f, 0.f, +1.f};
+
+// Which of the cycle's `slots` the i-th of n frames uses. The reference fixes
+// each cycle at 2 slots (idle) or 6 (walk); a different frame count resamples
+// those slots — exact at the reference counts, nearest otherwise.
+// n 帧循环里第 i 帧用哪个槽位（循环共 `slots` 个槽）。参考图把每个循环定死在
+// 2 个槽（待机）或 6 个槽（走路）；帧数不同时对这些槽位重采样 —— 参考帧数时精确，
+// 否则取最近。
+int slotOf(int i, int n, int slots) { return (i * slots) / n; }
 
 }  // namespace
 
@@ -170,14 +221,14 @@ Animation makeIdle(const Rig& rig, int frameCount, const PresetParams& sp) {
     // 下不到三分之一个像素，看不见；而躯干 pivot 在肩，会把躯干从腿上拽上去。
     // scaleY 留在数据模型里给关键帧编辑器用，那时 pivot 由用户自己放。
     //
-    // Amplitude is 2px, not 1px: with a 1px bob every lerped in-between frame
-    // rounds to the same offset, so the body stutters between two heights
-    // instead of rising and falling. 2px triangulates cleanly through the
-    // pixels. The reference sheet gets away with 1px only because it hard-cuts
-    // between its two frames and never interpolates.
-    // 幅度是 2 像素而非 1：起伏只有 1 像素时，所有插值中间帧取整到同一偏移，
-    // 身体在两个高度间抽搐而不是起落。2 像素能在像素上走出干净的三角波。
-    // 参考图能用 1 像素，只因它是两帧硬切、从不插值。
+    // Amplitude and direction come from the reference sheet's measured
+    // body_offset_y, not from a guessed "readable" value: idle bobs 1px DOWN
+    // on the exhale (kBobIdle = {0, 1}), where this preset used to bob 2px UP.
+    // One keyframe per frame, so the 1px step rasterises exactly — see the note
+    // on kBobIdle.
+    // 幅度与方向取自参考图实测的 body_offset_y，不是猜一个"看得清"的值：
+    // 待机在呼气时向下起伏 1 像素（kBobIdle = {0, 1}），而本预设过去是向上抬 2 像素。
+    // 每帧一个关键帧，所以 1 像素的步进能精确光栅化 —— 见 kBobIdle 的说明。
     //
     // No shoulder roll. Tried it, and at 8deg it read as the character
     // shrugging, not breathing — worse, nearest-neighbour rotation cost the
@@ -189,21 +240,17 @@ Animation makeIdle(const Rig& rig, int frameCount, const PresetParams& sp) {
     // 挪动不到一个像素；这里最接近的诚实等价物就是整体起伏。
     // -----------------------------------------------------------------------
 
-    const float bob = -2.f * sp.breathScale;
+    // The reference gives idle exactly 2 frames (rows 0/2/4 hold 2 cells
+    // each) — one breath per cycle. Lay one keyframe per frame so poseAt()
+    // never lerps the 1px step into a flat line.
+    // 参考图给 idle 正好 2 帧（row 0/2/4 各 2 格）—— 一次呼吸一个循环。
+    // 每帧一个关键帧，好让 poseAt() 不会把 1 像素的步进插成一条平线。
+    std::vector<Pose> poses(static_cast<size_t>(a.frameCount));
+    for (int i = 0; i < a.frameCount; ++i) {
+        poses[i].rootY = kBobIdle[slotOf(i, a.frameCount, 2)] * sp.breathScale;
+    }
 
-    // TWO keyframes, not four. The reference sheet gives idle exactly 2 frames
-    // (rows 0/2/4 hold 2 cells each), and at a 2-frame count four keyframes
-    // collapse onto the same two frame indices: the poses overwrite each other
-    // and both frames come out identical. Two keyframes give exactly one
-    // breath per cycle, which is what the sheet draws.
-    // 两个关键帧，不是四个。参考图给 idle 正好 2 帧（row 0/2/4 各 2 格），而
-    // 帧数为 2 时四个关键帧会塌到相同的两个帧序号上：姿势互相覆盖，两帧变得
-    // 一模一样。两个关键帧恰好一次呼吸一个循环，正是参考图画的东西。
-    Pose rest;
-    Pose inhale = rest;
-    inhale.rootY = bob;
-
-    spreadKeyframes(a, {rest, inhale});
+    spreadKeyframes(a, poses);
     return a;
 }
 
@@ -240,38 +287,34 @@ Animation makeWalkSide(const Rig& rig, int frameCount, const PresetParams& sp) {
     const float leg = 18.f * sizeFade * sp.motionScale;
     const float arm = 11.f * sizeFade * sp.motionScale;
 
-    // 2px, not 1px: with a 1px bob every lerped in-between frame rounds to the
-    // same offset, so the body appears to stutter between two heights instead
-    // of rising and falling. 2px triangulates cleanly through the pixels.
-    // 2 像素而非 1：起伏只有 1 像素时，所有插值中间帧取整到同一偏移，
-    // 看起来是在两个高度间抽搐，而不是起落。2 像素能在像素上走出干净的三角波。
-    const float bob = -2.f * sp.bobScale;
+    // The bob is kBobSide verbatim — 0/1px, sinking on the pass frames. This
+    // preset used to bob 2px the other way (up on the pass), which is both the
+    // wrong direction and twice the amplitude the sheet draws.
+    // 起伏照搬 kBobSide —— 0/1 像素，交叉帧下沉。本预设过去朝反方向起伏 2 像素
+    // （交叉帧上抬），方向错、幅度也是参考图画法的两倍。
+    //
+    // One keyframe per frame: the reference's rhythm holds each stride for two
+    // frames and cuts through the pass for one, which is not something four
+    // keyframes spread over six frames can express — that layout interpolated
+    // frames 2 and 5 and turned a 6-frame cycle into a 4-frame one.
+    // 每帧一个关键帧：参考图的节奏是跨步保持两帧、交叉一帧切过，四个关键帧铺在
+    // 六帧上表达不了 —— 那样会把第 2、5 帧变成插值，把 6 帧的循环压成 4 帧的。
+    std::vector<Pose> poses(static_cast<size_t>(a.frameCount));
 
-    // Classic contact / pass rhythm, 4 keyframes over the cycle.
-    // 经典 contact / pass 节奏，循环内 4 个关键帧。
-    std::vector<Pose> poses(4);
+    for (int i = 0; i < a.frameCount; ++i) {
+        const int   s = slotOf(i, a.frameCount, 6);
+        const float w = kSwingWalk[s];
+        Pose& p = poses[i];
 
-    // K0 contact: left leg forward, right leg back. Arms counter-swing.
-    // K0 触地：左腿在前，右腿在后。手臂反向摆。
-    poses[0].parts[PART_LEG_LEFT - 1].rotateDeg  = +leg;
-    poses[0].parts[PART_LEG_RIGHT - 1].rotateDeg = -leg;
-    poses[0].parts[PART_ARM_LEFT - 1].rotateDeg  = -arm;
-    poses[0].parts[PART_ARM_RIGHT - 1].rotateDeg = +arm;
+        // Legs swing about the hip; the two stay opposite. Arms counter-swing.
+        // 腿绕胯摆，两条始终相反。手臂反向摆。
+        p.parts[PART_LEG_LEFT - 1].rotateDeg  = +leg * w;
+        p.parts[PART_LEG_RIGHT - 1].rotateDeg = -leg * w;
+        p.parts[PART_ARM_LEFT - 1].rotateDeg  = -arm * w;
+        p.parts[PART_ARM_RIGHT - 1].rotateDeg = +arm * w;
 
-    // K1 pass: legs together, body at the top of the bob.
-    // K1 交叉：双腿并拢，身体在起伏最高点。
-    poses[1].rootY = bob;
-
-    // K2 contact: mirrored.
-    // K2 触地：镜像。
-    poses[2].parts[PART_LEG_LEFT - 1].rotateDeg  = -leg;
-    poses[2].parts[PART_LEG_RIGHT - 1].rotateDeg = +leg;
-    poses[2].parts[PART_ARM_LEFT - 1].rotateDeg  = +arm;
-    poses[2].parts[PART_ARM_RIGHT - 1].rotateDeg = -arm;
-
-    // K3 pass: legs together again, top of the bob.
-    // K3 交叉：双腿再次并拢，起伏最高点。
-    poses[3].rootY = bob;
+        p.rootY = kBobSide[s] * sp.bobScale;
+    }
 
     spreadKeyframes(a, poses);
     return a;
@@ -288,7 +331,8 @@ Animation makeWalkSide(const Rig& rig, int frameCount, const PresetParams& sp) {
 // 用 scaleY（pivot 在关节）缩短，同时也是唯一不会在胯开缝的肢体动作，
 // 「好看」和「不脱节」在这里恰好是同一件事。
 static Animation makeWalkFrontal(const Rig& rig, int frameCount,
-                                 const PresetParams& sp, const char* name) {
+                                 const PresetParams& sp, const char* name,
+                                 bool facingAway) {
     Animation a;
     a.name = name;
     a.frameCount = std::max(4, frameCount);
@@ -309,40 +353,59 @@ static Animation makeWalkFrontal(const Rig& rig, int frameCount,
     const float legLift = 2.0f;
     const float armLift = 1.5f;
 
-    // 2px bob for the same reason as walk_side — see the note there.
-    // 起伏 2 像素，理由同 walk_side —— 见那里的说明。
-    const float bob = -2.f * sp.bobScale;
+    // The bob is kBobFrontal verbatim — 0/1/2px, sinking into the footfalls.
+    // See the note above kBobIdle: the old 2px upward bob was the wrong
+    // direction at twice the amplitude.
+    // 起伏照搬 kBobFrontal —— 0/1/2 像素，沉进落脚。见 kBobIdle 上方的说明：
+    // 旧的 2 像素上抬方向错、幅度翻倍。
+    //
+    // One keyframe per frame, for the same reason as walk_side: the reference
+    // holds each stride for two frames and cuts the pass for one.
+    // 每帧一个关键帧，理由同 walk_side：参考图每个跨步保持两帧、交叉切一帧。
+    //
+    // `facingAway` FLIPS THE SWING SIGN for the back view. Turning the
+    // character around mirrors which screen side a given leg lands on: the
+    // leg lifted at slot 0 reads on our left when we see their face and on our
+    // right when we see their back. Measured off anim_reference.json —
+    // walk_front's boot bottoms differ left-minus-right by [+2,0,-2,-2,0,+1]
+    // and walk_up's by [-2,0,+1,+1,0,-1], an almost exact mirror. Sharing one
+    // sign between the two walks had walk_up lifting the wrong screen leg.
+    // `facingAway` 为背面视图【翻转摆动符号】。角色转身后，同一条腿落到屏幕上的
+    // 左右侧会互换：槽 0 抬起的那条腿，看到脸时在我们左边、看到后脑时在我们右边。
+    // 由 anim_reference.json 实测 —— walk_front 的靴底左右差是
+    // [+2,0,-2,-2,0,+1]，walk_up 的是 [-2,0,+1,+1,0,-1]，几乎精确镜像。
+    // 两个走路共用一个符号，会让 walk_up 抬错屏幕上的那条腿。
+    std::vector<Pose> poses(static_cast<size_t>(a.frameCount));
+    const float flip = facingAway ? -1.f : +1.f;
 
-    std::vector<Pose> poses(4);
+    for (int i = 0; i < a.frameCount; ++i) {
+        const int   s = slotOf(i, a.frameCount, 6);
+        const float w = kSwingWalk[s] * flip;
+        Pose& p = poses[i];
 
-    // K0 — body low, left foot stepping toward the camera (shortened), right
-    //      hand forward (shortened). Limbs are contralateral in a real walk.
-    // K0 —— 身体低，左脚迈向镜头（变短），右手在前（变短）。真人走路是交叉的。
-    poses[0].parts[PART_LEG_LEFT - 1].scaleY  = liftScale(rig, PART_LEG_LEFT,  legLift, sp);
-    poses[0].parts[PART_ARM_RIGHT - 1].scaleY = liftScale(rig, PART_ARM_RIGHT, armLift, sp);
+        // The swinging leg and the opposite arm lift toward the camera; the
+        // pass frames leave both feet on the ground. Limbs are contralateral.
+        // 摆动腿与对侧手臂抬向镜头；交叉帧双脚着地。四肢是交叉的。
+        if (w != 0.f) {
+            const int   legId = (w > 0.f) ? PART_LEG_LEFT  : PART_LEG_RIGHT;
+            const int   armId = (w > 0.f) ? PART_ARM_RIGHT : PART_ARM_LEFT;
+            const float m     = (w > 0.f) ? w : -w;
+            p.parts[legId - 1].scaleY = liftScale(rig, legId, legLift * m, sp);
+            p.parts[armId - 1].scaleY = liftScale(rig, armId, armLift * m, sp);
+        }
 
-    // K1 — both feet down, body at the top of the bob.
-    // K1 —— 双脚着地，身体在起伏最高点。
-    poses[1].rootY = bob;
-
-    // K2 — mirrored: right foot forward, left hand forward.
-    // K2 —— 镜像：右脚在前，左手在前。
-    poses[2].parts[PART_LEG_RIGHT - 1].scaleY = liftScale(rig, PART_LEG_RIGHT, legLift, sp);
-    poses[2].parts[PART_ARM_LEFT - 1].scaleY  = liftScale(rig, PART_ARM_LEFT,  armLift, sp);
-
-    // K3 — pass again.
-    // K3 —— 再次交叉。
-    poses[3].rootY = bob;
+        p.rootY = kBobFrontal[s] * sp.bobScale;
+    }
 
     spreadKeyframes(a, poses);
     return a;
 }
 
 Animation makeWalkFront(const Rig& rig, int frameCount, const PresetParams& sp) {
-    return makeWalkFrontal(rig, frameCount, sp, "walk_front");
+    return makeWalkFrontal(rig, frameCount, sp, "walk_front", false);
 }
 Animation makeWalkUp(const Rig& rig, int frameCount, const PresetParams& sp) {
-    return makeWalkFrontal(rig, frameCount, sp, "walk_up");
+    return makeWalkFrontal(rig, frameCount, sp, "walk_up", true);
 }
 
 Animation makeIdle(const Rig& rig, int frameCount) {
