@@ -47,6 +47,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _argv = sys.argv[1:]
 OUT = os.path.join(ROOT, "output", "review")
 VIEW_ARG = "all"
+TEMPLATE = "chibi_standard"    # character template / 角色模板
 _rest = []
 _i = 0
 while _i < len(_argv):
@@ -54,6 +55,11 @@ while _i < len(_argv):
         if _i + 1 >= len(_argv):
             sys.exit("ERROR: --view needs front|side|back|all")
         VIEW_ARG = _argv[_i + 1]
+        _i += 2
+    elif _argv[_i] == "--template":
+        if _i + 1 >= len(_argv):
+            sys.exit("ERROR: --template needs a name (e.g. chibi_standard, chibi_alt)")
+        TEMPLATE = _argv[_i + 1]
         _i += 2
     else:
         _rest.append(_argv[_i])
@@ -63,13 +69,20 @@ if _rest:
 if VIEW_ARG not in ("front", "side", "back", "all"):
     sys.exit(f"ERROR: unknown view {VIEW_ARG!r}, expected front|side|back|all")
 
+# The output PNG + fixture basename comes from the template JSON's
+# "output_basename" (default character_32) — same rule as make_test_character.
+# 输出 PNG + 夹具基名来自模板 JSON 的 "output_basename"（默认 character_32）
+# —— 与 make_test_character 同一规则。
+with open(os.path.join(ROOT, "assets", "templates", TEMPLATE + ".json")) as _f:
+    BASE = json.load(_f).get("output_basename", "character_32")
+
 SIZE = 32                      # canonical canvas / 标准画布
 ORIGIN_X, ORIGIN_Y = 9, 2      # content placement in canvas / 内容在画布中的位置
 
 VIEWS = ("front", "side", "back")
 
 # One colour per part id, for the ownership tint. Purely cosmetic — this is
-# not the character's palette, which lives in chibi_standard.json.
+# not the character's palette, which lives in the template JSON.
 # 每部件一色，用于归属着色。纯装饰 —— 这不是角色调色板（那在 chibi_standard.json）。
 PART_COLOURS = {
     1: (255,  99,  71), 2: ( 60, 170, 255), 3: (255, 200,  60),
@@ -168,7 +181,7 @@ def select_view(view):
     global VIEW, PART_REGIONS, ANCHORS, PRESETS, BUNDLE
     VIEW = view
     suffix = "" if view == "front" else "_" + view
-    bundle = os.path.join(ROOT, "tests", "fixtures", "character_32" + suffix)
+    bundle = os.path.join(ROOT, "tests", "fixtures", BASE + suffix)
     BUNDLE = bundle
 
     regions = []
@@ -194,9 +207,9 @@ def select_view(view):
 
 
 def load_template(view):
-    """Render the view's pixel map through chibi_standard.json's palette.
-    用 chibi_standard.json 的调色板渲染该视图的像素图。"""
-    with open(os.path.join(ROOT, "assets", "templates", "chibi_standard.json")) as f:
+    """Render the view's pixel map through the template JSON's palette.
+    用模板 JSON 的调色板渲染该视图的像素图。"""
+    with open(os.path.join(ROOT, "assets", "templates", TEMPLATE + ".json")) as f:
         spec = json.load(f)
     palette = {k: tuple(v) for k, v in spec["palette"].items()}
     char_map = spec["palette_chars"]
@@ -228,10 +241,10 @@ def load_template(view):
 
 
 def check_against_asset(rendered):
-    """The rendered template must equal assets/character_32{,_side,_back}.png.
-    渲染出的模版必须与 assets/character_32{,_side,_back}.png 逐像素相同。"""
+    """The rendered template must equal assets/<BASE>{,_side,_back}.png.
+    渲染出的模版必须与 assets/<BASE>{,_side,_back}.png 逐像素相同。"""
     suffix = "" if VIEW == "front" else "_" + VIEW
-    ref = Image.open(os.path.join(ROOT, "assets", f"character_32{suffix}.png")).convert("RGBA")
+    ref = Image.open(os.path.join(ROOT, "assets", f"{BASE}{suffix}.png")).convert("RGBA")
     if ref.size != rendered.size:
         return False, f"size mismatch {ref.size} vs {rendered.size}"
     a, b = ref.load(), rendered.load()
@@ -327,7 +340,7 @@ def build_template_sheet(rendered):
     sheet = Image.new("RGB", (W, H), (248, 249, 251))
     d = ImageDraw.Draw(sheet, "RGBA")
 
-    text(d, (pad, 14), f"chibi_standard — {VIEW_LABELS[VIEW]} template / 模版图（32x32，12x 最近邻放大）", F_TITLE)
+    text(d, (pad, 14), f"{TEMPLATE} — {VIEW_LABELS[VIEW]} template / 模版图（32x32，12x 最近邻放大）", F_TITLE)
 
     # Panel A: the template itself on a checkerboard, with pixel grid.
     # 面板 A：模版本体，棋盘格底 + 像素网格。
@@ -670,7 +683,7 @@ def review_view(view):
     rendered, _spec = load_template(view)
 
     ok, detail = check_against_asset(rendered)
-    print(f"[template] render vs assets/character_32{suffix}.png: "
+    print(f"[template] render vs assets/{BASE}{suffix}.png: "
           f"{'PASS (pixel-exact)' if ok else 'FAIL — ' + detail}")
     if not ok:
         print("  !! template is NOT the committed asset; fix before judging animation")
@@ -697,7 +710,7 @@ def main():
 
     all_ok = True
     for view in views:
-        bundle_name = "character_32" + ("" if view == "front" else "_" + view)
+        bundle_name = BASE + ("" if view == "front" else "_" + view)
         print()
         print("=" * 76)
         print(f"  {VIEW_LABELS[view]}   rig = tests/fixtures/{bundle_name}")

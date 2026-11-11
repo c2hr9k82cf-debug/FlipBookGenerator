@@ -1,0 +1,8 @@
+# partId x y   — one rotation pivot per part, original-image coords
+# 每部件一个旋转锚点，原图坐标
+1 15 12
+2 16 13
+3 13 13
+4 19 13
+5 14 21
+6 19 21

@@ -1,0 +1,48 @@
+# chibi_alt_side_pixels.txt — pixel-exact character template (side) — RESKIN
+# 逐像素角色模板（侧视）—— 换皮
+#
+# Same skeleton as chibi_standard side; only hair / clothes / palette changed.
+# 与 chibi_standard 侧视同骨架；只换发型、衣服与配色。
+#
+# What changed vs chibi_standard side / 相对 chibi_standard 侧视的改动:
+#   * Hair rows y3-y6 (art rows 1-4): fuller, straighter — a fuller blue bob.
+#     发型 y3-y6（art 第 1-4 行）：更饱满、更齐 —— 更蓬的蓝波波头。
+#   * Eye row y8 (art row 6): eye white 'm' -> 'w' (decouple eye from vest).
+#     眼睛 y8（art 第 6 行）：眼白 'm' -> 'w'（眼睛与马甲解耦）。
+#   * Palette: blue hair, red top, blue jeans. See chibi_alt.json.
+#     配色：蓝发、红上衣、蓝牛仔裤。见 chibi_alt.json。
+#
+# 30 rows x 14 cols, placed at x9..x22, y2..y31 in 32x32.
+# 30 行 x 14 列，放在 32x32 的 x9..x22, y2..y31。
+# Part ownership lives in chibi_alt.json (views.<view>.part_map).
+# 部件归属在 chibi_alt.json（views.<view>.part_map）。
+.....@@@@@....
+....@hhhhh@...
+...@HhhhhhH@..
+..@HhhhhhhhH@.
+..@HhhhhhhhH@.
+.HHhhHb@@bHhH.
+.@HH@H@wTsshh.
+.@HHbssw@ssHh.
+.@HHrssssssH..
+.@HHrrssssH...
+.@HHHrrbbrH...
+..H@@mgbbg@...
+..@ssmmggms@..
+..@sbmwmmwm@..
+.@sb@wwwwwms@.
+.@sb@wwwwwms@.
+.@sbb@mmmm@ss@
+.@ssb@mmmm@ss@
+..@ss@@@@@ss@.
+..@ssttttp@s@.
+..@bbttttp@b@.
+...@@ttppp@@..
+....@tt@@p@...
+....@tt@@p@...
+...@tt@@pp@...
+...@tt@@pp@...
+...@@@@@@@@...
+...@gg@@GG@...
+..@ggg@@GGG@..
+..@@@@..@@@...

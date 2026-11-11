@@ -28,6 +28,12 @@
 #   python3 -I tools/make_test_character.py                      # front view
 #   python3 -I tools/make_test_character.py --view side          # side view
 #   python3 -I tools/make_test_character.py --view back /tmp/peek  # look at it
+#   python3 -I tools/make_test_character.py --template chibi_alt   # the reskin
+#   python3 -I tools/make_test_character.py --template chibi_alt --view side
+# The template name picks assets/templates/<name>.json; the output PNG + bundle
+# basename comes from that JSON's "output_basename" (default character_32).
+# template 名选 assets/templates/<name>.json；输出 PNG + bundle 的基名来自该 JSON 的
+# "output_basename"（默认 character_32）。
 
 import os
 import sys
@@ -52,12 +58,19 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 VIEWS = ('front', 'side', 'back')
 
+# Which character to author. Set by --template; the default is the reference
+# character. A reskin is a DIFFERENT template name + its own pixels/json — the
+# skeleton (part_map) can stay identical. This is how chibi_alt is authored.
+# 要绘制哪个角色。由 --template 设定，默认是参考角色。换皮 = 另一个 template 名 +
+# 自己的 pixels/json —— 骨架（part_map）可以保持一致。chibi_alt 就是这么来的。
+TEMPLATE_NAME = 'chibi_standard'
+
 
 def load_template(view):
     """(art rows, char -> RGB-or-None, spec, part_map) for one view.
     取某个视图的（像素行列表，字符 -> RGB 或 None，spec，part_map）。"""
     import json
-    with open(os.path.join(ROOT, 'assets', 'templates', 'chibi_standard.json')) as f:
+    with open(os.path.join(ROOT, 'assets', 'templates', TEMPLATE_NAME + '.json')) as f:
         spec = json.load(f)
     palette = {k: tuple(v) for k, v in spec['palette'].items()}
     # palette_chars maps a character to a palette ROLE name ('.' -> None for
@@ -228,6 +241,7 @@ def select_view(view):
 
 
 def main():
+    global TEMPLATE_NAME
     argv = sys.argv[1:]
     view = 'front'
     if '--view' in argv:
@@ -240,10 +254,18 @@ def main():
         if view not in VIEWS:
             print(f'ERROR: unknown view {view!r}, expected one of {VIEWS}')
             return 1
+    if '--template' in argv:
+        i = argv.index('--template')
+        if i + 1 >= len(argv):
+            print('ERROR: --template needs a template name (e.g. chibi_standard, chibi_alt)')
+            return 1
+        TEMPLATE_NAME = argv[i + 1]
+        del argv[i:i + 2]
     out_root = argv[0] if argv else None
 
     select_view(view)
     suffix = '' if view == 'front' else '_' + view
+    out_base = SPEC.get('output_basename', 'character_32')
     frame, parts = build()
 
     # The reconstruction gate, checked before anything is written.
@@ -262,12 +284,12 @@ def main():
         here = os.path.dirname(os.path.abspath(__file__))
         assets = os.path.join(os.path.dirname(here), 'assets')
         bundle = os.path.join(os.path.dirname(here), 'tests', 'fixtures',
-                              'character_32' + suffix)
+                              out_base + suffix)
     os.makedirs(assets, exist_ok=True)
     os.makedirs(bundle, exist_ok=True)
 
-    image_rel = f'assets/character_32{suffix}.png'
-    write_png(os.path.join(assets, f'character_32{suffix}.png'), frame)
+    image_rel = f'assets/{out_base}{suffix}.png'
+    write_png(os.path.join(assets, f'{out_base}{suffix}.png'), frame)
 
     names = ['head', 'body', 'arm_left', 'arm_right', 'leg_left', 'leg_right']
     anchors = SPEC['views'][view].get('anchors', {})
@@ -296,7 +318,7 @@ def main():
         with open(os.path.join(bundle, name + '_bbox.txt'), 'w') as f:
             f.write(f'{bx} {by} {bw} {bh}\n')
 
-    print(f'wrote {os.path.join(assets, f"character_32{suffix}.png")}')
+    print(f'wrote {os.path.join(assets, f"{out_base}{suffix}.png")}')
     print(f'wrote bundle -> {bundle}')
     for name in names:
         (bx, by, bw, bh), sprite = parts[name]

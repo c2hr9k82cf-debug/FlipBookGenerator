@@ -1,0 +1,62 @@
+# chibi_alt_pixels.txt — pixel-exact character template (front) — RESKIN
+# 逐像素角色模板（正面）—— 换皮
+#
+# Same skeleton as chibi_standard (proportions / part_map / part_ids / anchors
+# are identical); only the hair, the clothes and the palette are changed. This
+# is the "same-skeleton reskin" of the plan's Part 4.
+# 与 chibi_standard 同骨架（proportions / part_map / part_ids / anchors 完全一致）；
+# 只换发型、衣服与配色。这是计划 Part 4 的「同骨架换皮」。
+#
+# What changed vs chibi_standard front / 相对 chibi_standard 正面的改动:
+#   * Hair rows y3-y6 (art rows 1-4): a fuller, straighter bob with a solid
+#     fringe. Deliberately new pixels.
+#     发型 y3-y6（art 第 1-4 行）：更饱满、更齐的波波头 + 实心刘海。刻意新画。
+#   * Eye row y8 (art row 6): the eye white 'm' -> 'w', decoupling the eye from
+#     the vest. In chibi_standard 'm' (mint) is BOTH the eye white and the vest;
+#     a reskin would otherwise recolour the eyes along with the top. Now 'm' is
+#     the vest only and 'w' is the eye white (and the sleeves).
+#     眼睛 y8（art 第 6 行）：眼白 'm' -> 'w'，把眼睛与马甲解耦。chibi_standard 里
+#     'm'（薄荷）既是眼白又是马甲；换皮会顺带改掉眼睛。现在 'm' 只做马甲，'w' 做
+#     眼白（兼袖口）。
+#   * Palette: a new cool scheme — blue hair, red top, blue jeans (two similar
+#     blue tones for the pants tone swap). See chibi_alt.json.
+#     配色：新的冷色系 —— 蓝发、红上衣、蓝牛仔裤（裤子两主色同为蓝、深浅不同，供
+#     换色）。见 chibi_alt.json。
+#
+# 30 rows x 14 cols, placed at x9..x22, y2..y31 in 32x32.
+# 30 行 x 14 列，放在 32x32 的 x9..x22, y2..y31。
+#
+# Palette chars -> role names live in chibi_alt.json (palette_chars).
+# 字符到角色名的映射在 chibi_alt.json（palette_chars）。
+# Part ownership lives in chibi_alt.json (views.<view>.part_map).
+# 部件归属在 chibi_alt.json（views.<view>.part_map）。
+....@@@@@@....
+..@HhhhhhhH@..
+.@HhhhhhhhhH@.
+@HhhhhhhhhhhH@
+@HhhhHHHHhhhH@
+HHhH@@bb@@HhH@
+@HH@wTssTw@hhH
+@HHbw@ss@wbHhH
+@HHrssssssrHH.
+@HHHrssssrHH..
+@HHHrrbbrrHH..
+.H@@mgssgm@@..
+.@ssmmggmmss@.
+.@sbmwmmwmbs@.
+@sbmwwwwwwmbs@
+@sbmwwwwwwmbs@
+@sbmmmmmmmmbs@
+@ssbmmmmmmbss@
+@sss@@@@@@sss@
+.@b@pppptt@b@.
+.@spppppttts@.
+..@pppptttt@..
+...@pp@@tt@...
+...@pp@@tt@...
+..@pp@.@tt@...
+..@pp@.@tt@...
+..@@@@.@@@@...
+..@GG@.@gg@...
+.@GGG@.@ggg@..
+.@@@@...@@@...

@@ -1,0 +1,110 @@
+{
+  "name": "chibi_alt",
+  "description": "Same-skeleton RESKIN of chibi_standard (plan Part 4). Identical proportions / part_map / part_ids / anchors; only the hair (fuller blue bob), the clothes and the palette are changed. A cool scheme — blue hair, red top, blue jeans (two similar-hue blue tones for the pants tone swap). The palette role NAMES are reused slots from chibi_standard (e.g. 'mint' is now the top colour, 'tan'/'pants' the two jean tones, 'teal' the eye) — the chars in the pixel maps are unchanged; only the RGB values differ. output_basename tells make_test_character.py where to write the PNG + fixture bundle.",
+
+  "output_basename": "character_alt",
+  "size": {"width": 32, "height": 32},
+  "proportions": {
+    "head": {"y_start": 2, "y_end": 12, "rows": 11},
+    "body": {"y_start": 13, "y_end": 20, "rows": 8},
+    "legs": {"y_start": 21, "y_end": 31, "rows": 11},
+    "total_rows": 30,
+    "content_width": 14,
+    "margin_x": 9,
+    "margin_top": 2,
+    "margin_bottom": 0
+  },
+
+  "palette": {
+    "outline":       [42, 42, 58],
+    "hair_mid":      [88, 118, 208],
+    "hair_dark":     [52, 74, 164],
+    "hair_highlight":[176, 202, 246],
+    "skin":          [255, 212, 188],
+    "blush":         [255, 164, 152],
+    "tan":           [120, 150, 206],
+    "mint":          [208, 74, 92],
+    "white":         [252, 252, 255],
+    "red":           [232, 84, 92],
+    "pants":         [68, 96, 156],
+    "grey":          [150, 162, 192],
+    "grey_dark":     [98, 110, 148],
+    "gold":          [176, 202, 246],
+    "teal":          [52, 132, 150]
+  },
+  "palette_chars": {
+    "@": "outline",
+    "h": "hair_mid",
+    "H": "hair_dark",
+    "y": "hair_highlight",
+    "s": "skin",
+    "b": "blush",
+    "t": "tan",
+    "m": "mint",
+    "w": "white",
+    "r": "red",
+    "p": "pants",
+    "g": "grey",
+    "G": "grey_dark",
+    "T": "teal",
+    ".": null
+  },
+
+  "part_ids": {
+    "head": 1,
+    "body": 2,
+    "arm_left": 3,
+    "arm_right": 4,
+    "leg_left": 5,
+    "leg_right": 6
+  },
+
+  "views": {
+    "_schema": {
+      "part_map": "Ownership in ABSOLUTE image coords — identical to chibi_standard (same skeleton). head_rows owns the whole width of those rows; body owns body_rows minus arm_left_cols/arm_right_cols; legs split leg_rows by leg_split_per_row (x <= split -> leg_left, x > split -> leg_right).",
+      "part_map_zh": "归属用【绝对图像坐标】—— 与 chibi_standard 完全一致（同骨架）。head_rows 整宽归头；body 取 body_rows 减去手臂列；腿按 leg_split_per_row 划分。"
+    },
+
+    "front": {
+      "pixels_file": "chibi_alt_pixels.txt",
+      "sheet_cell": [0, 0],
+      "part_map": {
+        "head_rows": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        "body_rows": [13, 14, 15, 16, 17, 18, 19, 20],
+        "leg_rows":  [21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31],
+        "arm_left_cols":  [9, 10, 11],
+        "arm_right_cols": [20, 21, 22],
+        "leg_split_per_row": [15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15]
+      }
+    },
+
+    "side": {
+      "pixels_file": "chibi_alt_side_pixels.txt",
+      "sheet_cell": [0, 2],
+      "part_map": {
+        "head_rows": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        "body_rows": [13, 14, 15, 16, 17, 18, 19, 20],
+        "leg_rows":  [21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31],
+        "arm_left_cols":  [10, 11, 12, 13],
+        "arm_right_cols": [19, 20, 21, 22],
+        "leg_split_per_row": [17, 17, 15, 15, 15, 15, 15, 15, 15, 15, 15]
+      },
+      "anchors": {
+        "leg_right": [19, 21]
+      }
+    },
+
+    "back": {
+      "pixels_file": "chibi_alt_back_pixels.txt",
+      "sheet_cell": [0, 4],
+      "part_map": {
+        "head_rows": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        "body_rows": [13, 14, 15, 16, 17, 18, 19, 20],
+        "leg_rows":  [21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31],
+        "arm_left_cols":  [9, 10, 11],
+        "arm_right_cols": [20, 21, 22],
+        "leg_split_per_row": [15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15]
+      }
+    }
+  }
+}

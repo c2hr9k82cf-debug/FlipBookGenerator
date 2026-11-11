@@ -30,6 +30,17 @@ Pose lerpPose(const Pose& a, const Pose& b, float t) {
     }
     r.rootX = a.rootX + (b.rootX - a.rootX) * t;
     r.rootY = a.rootY + (b.rootY - a.rootY) * t;
+    // hidden and swaps are DISCRETE per-frame attributes — they say which parts
+    // are drawn THIS frame and how the palette trades THIS frame, not a
+    // continuum to blend. Rebuilding `r` field-by-field (as the continuous
+    // fields above do) would silently drop them and leave the frame with no
+    // tone swap and every limb visible. Carry the nearer keyframe's instead.
+    // hidden 与 swaps 是【逐帧离散】属性 —— 说明本帧画哪些部件、本帧调色板怎么换，
+    // 不是要混合的连续量。像上面连续字段那样逐字段重建 `r` 会悄悄丢掉它们，导致
+    // 该帧既不换色、所有肢体又都可见。改为采用更近关键帧的那一套。
+    const Pose& near = (t < 0.5f) ? a : b;
+    r.hidden = near.hidden;
+    r.swaps  = near.swaps;
     return r;
 }
 
@@ -55,6 +66,17 @@ Pose Animation::poseAt(int frame) const {
 
     const int first = sorted.front().frame;
     const int last  = sorted.back().frame;
+
+    // Exact keyframe hit: return the authored pose VERBATIM. This is what makes
+    // "one keyframe per frame" truly mean "every rendered frame is exactly the
+    // frame that was authored" — including its discrete fields (hidden, swaps),
+    // which any interpolation would drop (see lerpPose). The presets lay one
+    // keyframe per frame precisely so this path is taken on every frame.
+    // 精确命中关键帧：【原样】返回所写的姿势。正是这一步让"每帧一个关键帧"真正
+    // 等于"每帧渲染结果精确等于所写" —— 包括 hidden、swaps 这些离散字段，任何插值
+    // 都会丢掉（见 lerpPose）。预设正是每帧一个关键帧，好让每帧都走这条路。
+    for (const Keyframe& k : sorted)
+        if (k.frame == frame) return k.pose;
 
     if (!loop) {
         // Clamp outside the keyframe span. / 关键帧范围外钳住。

@@ -1,0 +1,49 @@
+# chibi_alt_back_pixels.txt — pixel-exact character template (back) — RESKIN
+# 逐像素角色模板（背视）—— 换皮
+#
+# Same skeleton as chibi_standard back; only hair / clothes / palette changed.
+# The back is all hair (back of the head) with red ribbons down the sides —
+# no eyes here, so no eye-decoupling row is needed.
+# 与 chibi_standard 背视同骨架；只换发型、衣服与配色。背面全是头发（后脑）加两侧
+# 红发带 —— 无眼睛，故无眼白解耦行。
+#
+# What changed vs chibi_standard back / 相对 chibi_standard 背视的改动:
+#   * Hair rows y3-y6 (art rows 1-4): fuller, matching the front bob's volume.
+#     发型 y3-y6（art 第 1-4 行）：更饱满，与正面波波头的发量一致。
+#   * Palette: blue hair, red ribbons, red top, blue jeans. See chibi_alt.json.
+#     配色：蓝发、红发带、红上衣、蓝牛仔裤。见 chibi_alt.json。
+#
+# 30 rows x 14 cols, placed at x9..x22, y2..y31 in 32x32.
+# 30 行 x 14 列，放在 32x32 的 x9..x22, y2..y31。
+# Part ownership lives in chibi_alt.json (views.<view>.part_map).
+# 部件归属在 chibi_alt.json（views.<view>.part_map）。
+....@@@@@@....
+..@HhhhhhhH@..
+.@HhhhhhhhhH@.
+@HhhhhhhhhhhH@
+@HhhhHHHHhhhH@
+HrhHhHhhHhHhrH
+.rhhhHhhHhHhr.
+.rhhhhhhHhhhr.
+.rHhhhhhHhhhr.
+.rHhhhhhhhHr..
+.rhhhrhhrhHr..
+..rhhrhhrhr@..
+.@rHrhhhhHrs@.
+.@srhhhhhHbs@.
+@sb@rrrrrw@bs@
+@sb@wwwwww@bs@
+@sb@wwwwww@bs@
+@sb@mmmmmm@bs@
+.@s@@@@@@@@s@.
+.@b@ttpppp@b@.
+.@s@ttpppp@s@.
+..@@tttppp@@..
+...@tt@@pp@...
+...@tt@@pp@...
+...@tt@.@pp@..
+...@tt@.@pp@..
+...@@@@.@@@@..
+...@gg@.@GG@..
+...@gg@.@GGG@.
+....@@...@@@..

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(FlipBookGenerator VERSION 0.6.2 LANGUAGES CXX)
+project(FlipBookGenerator VERSION 0.6.3 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -59,42 +59,44 @@ target_link_libraries(flipbook flipbook_core ${OpenCV_LIBS})
 # 它按视图各跑一次 —— 正面、侧视、背视各有自己的 rig 与源图，各自都要自证。
 # ---------------------------------------------------------------------------
 enable_testing()
-foreach(view front side back)
-    if(view STREQUAL "front")
-        set(bundle tests/fixtures/character_32)
-    else()
-        set(bundle tests/fixtures/character_32_${view})
-    endif()
+# Both characters run the same gates: the reference character (character_32)
+# and the same-skeleton reskin (character_alt). Each has three views.
+# 两个角色跑同样的闸门：参考角色（character_32）与同骨架换皮（character_alt）。
+# 各有三视图。
+foreach(char character_32 character_alt)
+    foreach(view front side back)
+        if(view STREQUAL "front")
+            set(bundle tests/fixtures/${char})
+        else()
+            set(bundle tests/fixtures/${char}_${view})
+        endif()
+        add_test(
+            NAME reconstruction_${char}_${view}
+            COMMAND flipbook --recon-test --bundle
+                    ${CMAKE_CURRENT_SOURCE_DIR}/${bundle}
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+        # The idle-invariant gate. The idle is a STRETCH (legs planted, torso
+        # grows, head/arms rise): one frame is byte-identical to the source, the
+        # leg region never moves, and no frame splits into more blobs than the
+        # source. Read from the rendered frames, not the keyframes.
+        # 待机不变量闸门。待机是【伸展】（腿钉住、躯干加长、头/臂抬起）：有一帧与
+        # 源图逐字节相同、腿部区域从不动、没有帧比源图裂成更多连通块。从渲染帧读取。
+        add_test(
+            NAME idle_purity_${char}_${view}
+            COMMAND flipbook --idle-purity --bundle
+                    ${CMAKE_CURRENT_SOURCE_DIR}/${bundle}
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+    endforeach()
+
+    # Preset smoke test on the front rig (the rig the preset names describe).
+    # 在正面 rig 上跑预设冒烟测试（预设名描述的正是这套 rig）。
     add_test(
-        NAME reconstruction_${view}
-        COMMAND flipbook --recon-test --bundle
-                ${CMAKE_CURRENT_SOURCE_DIR}/${bundle}
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    )
-    # The pinch/tear gate. A uniform bob cannot pull parts apart, so the seam
-    # repair has to leave every idle frame byte-identical to the source moved.
-    # Over-filling (redrawing the artist's notch) and under-filling (a missed
-    # tear) both show up here as a frame that is no longer a translation.
-    # 撕裂闸门。整体起伏拉不开部件，所以补缝必须让每帧待机与【移动过的源图】
-    # 逐字节相同。多补（把画师的缺口重画）与少补（漏掉的撕裂）都会让该帧不再是
-    # 平移，从而在这里现形。
-    add_test(
-        NAME idle_purity_${view}
-        COMMAND flipbook --idle-purity --bundle
-                ${CMAKE_CURRENT_SOURCE_DIR}/${bundle}
+        NAME presets_smoke_${char}
+        COMMAND flipbook --presets --bundle
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/${char}
+                --out ${CMAKE_CURRENT_BINARY_DIR}/test_preview_${char}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
 endforeach()
-
-# Preset smoke test: the four presets are named after their visual intent
-# (walk_side walks sideways, walk_front walks toward the camera). They are
-# exercised on the front rig, which is the rig the preset names describe.
-# 预设冒烟测试：四个预设按视觉意图命名（walk_side 侧走、walk_front 走向镜头）。
-# 在正面 rig 上跑 —— 预设名描述的正是这套 rig。
-add_test(
-    NAME presets_smoke
-    COMMAND flipbook --presets --bundle
-            ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/character_32
-            --out ${CMAKE_CURRENT_BINARY_DIR}/test_preview
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-)
