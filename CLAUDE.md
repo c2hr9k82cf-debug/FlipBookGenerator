@@ -8,8 +8,8 @@ Turn AI-generated pixel-art character images into flipbook animations, entirely 
 
 ## Current state / 当前状态
 
-**V0.5.0 — re-planned. The roadmap below is the source of truth, not the old feature list.**
-**V0.5.0 —— 已重新规划。下面的路线图是唯一准绳，旧功能清单不是。**
+**V0.8.3 — the shipped GUI product is "drag 3 views in → one four-direction sheet out" (Tier B reskin pipeline). The roadmap below is the source of truth, not the old feature list.**
+**V0.8.3 —— GUI 产品形态是"拖三视图进 → 出一张四方向大图"（Tier B 换皮管线）。下面的路线图是唯一准绳，旧功能清单不是。**
 
 | What runs today / 今天能跑 | Status |
 |---|---|
@@ -17,11 +17,13 @@ Turn AI-generated pixel-art character images into flipbook animations, entirely 
 | Mode 2: single image → 6 body parts + placement metadata / 单图提取部件 + 位置元数据 | ✅ works |
 | Grid editor (paint / erase / k-means auto-detect / overview) / 格子编辑器 | ✅ works |
 | **Animation core engine (Phase 1) / 动画核心引擎** | ✅ **works** — 4 presets, reconstruction + detach gates pass |
-| GUI wizard + `.app` (Phase 2–5) / GUI 向导 + 打包 | ❌ not built — next |
+| **GUI app + packaged `.app` / GUI 应用 + 打包** | ✅ **works (v0.8.3)** — drag 3 template-aligned views in, one four-direction 192×256 sheet PNG out; `build_app.sh` → double-clickable `.app` |
 
-The CLI mode menu in `src/main.cpp` is **temporary**. It is being replaced by a
-guided wizard GUI with a double-clickable `.app`. Do not add features to the menu.
-`src/main.cpp` 的模式菜单是**临时的**，正被"可双击 `.app` 的引导式向导"取代。不要往菜单加功能。
+The CLI mode menu in `src/main.cpp` is **temporary**. The GUI product is the
+three-views-in → four-direction-sheet `.app` (`src/ui/`, `build_app.sh`). Do not
+add features to the menu.
+`src/main.cpp` 的模式菜单是**临时的**。GUI 产品是"三视图进 → 四方向大图"的 `.app`
+（`src/ui/`、`build_app.sh`）。不要往菜单加功能。
 
 ---
 

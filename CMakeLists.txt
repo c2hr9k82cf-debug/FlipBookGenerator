@@ -1,10 +1,21 @@
 cmake_minimum_required(VERSION 3.18)
-project(FlipBookGenerator VERSION 0.8.2 LANGUAGES CXX)
+project(FlipBookGenerator VERSION 0.8.3 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(OpenCV REQUIRED)
+# Only the modules the code actually uses. Linking all of OpenCV drags in
+# contrib modules and their fortran/BLAS chains (libgfortran), which breaks
+# dylibbundler (load-command overflow) and bloats the .app.
+# 只链真正用到的模块。链全量 OpenCV 会拖进 contrib 模块及其 fortran/BLAS 链
+# （libgfortran），既撑爆 dylibbundler 的 load command 空间，又让 .app 虚胖。
+find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs highgui)
+
+# The GUI ships without highgui/videoio — that chain drags in all of ffmpeg
+# (hundreds of MB). Only the temporary CLI menu's cv::imshow modes need it.
+# GUI 不带 highgui/videoio —— 那条链会拖进整个 ffmpeg（数百 MB）。只有临时 CLI
+# 菜单的 cv::imshow 模式需要它。
+set(OPENCV_MINIMAL_LIBS opencv_core opencv_imgproc opencv_imgcodecs)
 
 # Version header — single source of truth is project(VERSION ...) above
 # 版本号头文件 —— 唯一来源是上面的 project(VERSION ...)
@@ -39,7 +50,7 @@ add_library(flipbook_core STATIC
     src/core/palette.cpp
     src/core/sheet.cpp
 )
-target_link_libraries(flipbook_core ${OpenCV_LIBS})
+target_link_libraries(flipbook_core ${OPENCV_MINIMAL_LIBS})
 
 # ---------------------------------------------------------------------------
 # flipbook — the app / 应用
@@ -229,7 +240,7 @@ if(FLIPBOOK_BUILD_GUI)
         src/ui/spike_main.cpp
         src/ui/texture.cpp
     )
-    target_link_libraries(ui_spike imgui ${OpenCV_LIBS})
+    target_link_libraries(ui_spike imgui ${OPENCV_MINIMAL_LIBS})
 
     # The GUI app: three views in, one four-direction sheet PNG out. Thin shell
     # over flipbook_core — the GUI must export byte-identical to the CLI.
@@ -243,5 +254,9 @@ if(FLIPBOOK_BUILD_GUI)
         src/ui/texture.cpp
     )
     target_link_libraries(flipbook_gui
-        flipbook_core imgui portable-file-dialogs ${OpenCV_LIBS})
+        flipbook_core imgui portable-file-dialogs ${OPENCV_MINIMAL_LIBS})
+    # Header padding so install_name_tool can rewrite the packaged binary's
+    # install names (the standard packaging trick).
+    # 留头空间，让 install_name_tool 能改写打包后二进制的 install name（打包惯例）。
+    target_link_options(flipbook_gui PRIVATE "LINKER:-headerpad_max_install_names")
 endif()
