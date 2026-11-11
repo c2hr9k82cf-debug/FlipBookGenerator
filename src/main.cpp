@@ -914,9 +914,21 @@ int runAlignGate(const CliArgs& a) {
         fb::ExtractStats st;
         const bool okExtract =
             fb::extractPaletteMap(user1, ref, dummy, err, &st, /*tolerant=*/true);
-        if (okExtract) {
-            std::cout << "  conflict: extraction ACCEPTED a functional conflict   FAIL\n";
+        // v0.11.0 contract: tolerant REPAIRS a functional conflict (majority
+        // wins) and warns; strict still rejects it. Both checked here.
+        // v0.11.0 契约：宽容模式**修复**函数性冲突（多数派胜）并警告；严格照旧
+        // 拒绝。两者都在此检查。
+        std::string strictErr;
+        if (fb::extractPaletteMap(user1, ref, dummy, strictErr)) {
+            std::cout << "  conflict: strict mode ACCEPTED a functional conflict   FAIL\n";
             ++failures;
+        }
+        if (!okExtract || st.colourConflictPixels != 1 || st.warning.empty()) {
+            std::cout << "  conflict: tolerant should repair 1 px and warn   FAIL\n";
+            ++failures;
+        } else {
+            std::cout << "  conflict: tolerant repairs 1 px (majority) and warns,"
+                         " strict rejects   OK\n";
         }
         // The masks must be exact even though extraction failed.
         // 提取虽然失败，掩码必须精确。
@@ -2244,6 +2256,33 @@ int runPaletteGate(const CliArgs& a) {
             std::cout << "  " << viewNames[v] << ": third colour rejected   OK\n";
         }
 
+        // ---- negative 1b: the same dirty input in tolerant mode must PASS
+        // with majority mapping — 1 minority pixel repaired, the extracted map
+        // identical to the clean round trip (majority = the original colour).
+        // ---- 负向 1b：同一脏输入在宽容模式必须通过（多数派映射）—— 1 个少数派
+        // 像素被修复，提取映射与干净往返完全一致（多数派 = 原色）。
+        fb::PaletteMap tolMap;
+        fb::ExtractStats stTol;
+        if (!fb::extractPaletteMap(dirty, ref0, tolMap, err, &stTol, /*tolerant=*/true)) {
+            std::cout << "  " << viewNames[v]
+                      << ": tolerant mode REJECTED the dirty input: " << err << "   FAIL\n";
+            ++failures;
+        } else {
+            std::map<uint32_t, uint32_t> tolGot;
+            for (const auto& sw : tolMap)
+                tolGot[colourKey(sw.first)] = colourKey(sw.second);
+            const bool tolOk = (stTol.colourConflictPixels == 1) && (tolGot == got);
+            std::cout << "  " << viewNames[v] << ": tolerant majority repair "
+                      << stTol.colourConflictPixels << " px, map "
+                      << (tolGot == got ? "matches" : "DIFFERS");
+            if (!tolOk) {
+                std::cout << "   FAIL\n";
+                ++failures;
+            } else {
+                std::cout << "   OK\n";
+            }
+        }
+
         // ---- negative 2: the given user images must be rejected when they
         // fail strict alignment (only if --front/--side/--back were passed).
         // ---- 负向 2：给定的用户图若不满足严格对齐必须被拒绝（仅当传了
@@ -2261,6 +2300,25 @@ int runPaletteGate(const CliArgs& a) {
                 ++failures;
             } else {
                 std::cout << "  " << viewNames[v] << ": " << negPath << " rejected   OK\n";
+            }
+            // Strict keeps rejecting (above); tolerant must now WARN, not
+            // reject — the v0.11.0 usability fix ("other characters show
+            // nothing"). Must actually produce a map.
+            // 严格照旧拒绝（上）；宽容必须改为**提醒而不拒绝** —— v0.11.0 可用性
+            // 修复（"其他角色不显示"）。且必须真的产出映射。
+            if (!negPath.empty()) {
+                fb::PaletteMap tolNeg;
+                fb::ExtractStats stNeg;
+                if (fb::extractPaletteMap(neg, ref0, tolNeg, err, &stNeg, /*tolerant=*/true) &&
+                    !tolNeg.empty()) {
+                    std::cout << "  " << viewNames[v] << ": tolerant accepts " << negPath
+                              << " (mask diff " << stNeg.maskDiffPixels << " px, conflict "
+                              << stNeg.colourConflictPixels << " px)   OK\n";
+                } else {
+                    std::cout << "  " << viewNames[v] << ": tolerant mode REJECTED "
+                              << negPath << ": " << err << "   FAIL\n";
+                    ++failures;
+                }
             }
         }
     }

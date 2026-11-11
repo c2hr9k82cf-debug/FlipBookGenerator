@@ -1,13 +1,17 @@
 // palette.cpp — exact palette extraction: reference cell -> user image
 // 精确配色提取：参考格 → 用户图
 //
-// Strict by contract (the app plan's input alignment): same size, identical
-// alpha mask, and every ref colour must map to exactly ONE user colour — the
-// relation has to be a function or the reskin is ambiguous. No heuristics, no
-// tolerance: pixel art has no blending, a pixel is either the tone or not.
-// 契约严格（app 计划的输入对齐）：同尺寸、alpha 掩码一致、每个参考色恰好映射到
-// 一个用户色 —— 关系必须是函数，否则换皮有歧义。无启发式、无容差：像素风无混合，
-// 像素要么是该色要么不是。
+// Strict contract (default, gates): same size, identical alpha mask, and every
+// ref colour must map to exactly ONE user colour — the relation has to be a
+// function or the reskin is ambiguous. Tolerant contract (GUI, v0.11.0): a
+// function conflict no longer rejects — the MAJORITY user colour wins, the
+// minority pixels are marked in colourConflictMask and rendered as the
+// majority colour (the map stays total, so the sheet's coverage invariant is
+// untouched). Warn instead of reject; the diagnosis rides in ExtractStats.
+// 严格契约（默认，闸门）：同尺寸、alpha 掩码一致、每个参考色恰好映射到一个用户色
+// —— 关系必须是函数，否则换皮有歧义。宽容契约（GUI，v0.11.0）：函数性冲突不再
+// 拒绝 —— **多数派用户色**胜出，少数派像素记入 colourConflictMask 并按主色渲染
+// （映射保持全覆盖，大图覆盖不变量不动）。提醒而不拒绝；诊断装在 ExtractStats。
 
 #include "core.h"
 
@@ -164,11 +168,31 @@ bool extractPaletteMap(const cv::Mat& userImg, const cv::Mat& refCell,
                 conflictErr << " — not a function (is the image anti-aliased or misaligned? / "
                             << "不是函数（图有抗锯齿或没对齐？）)";
             }
+            // Tolerant: majority wins. The mapping still goes into pairs, so
+            // applyPaletteMap repaints the minority pixels as the majority
+            // colour and the output stays pure map-destination colours.
+            // 宽容：多数派胜。映射照进 pairs —— applyPaletteMap 会把少数派像素也
+            // 重涂成主色，输出保持纯映射目标色。
+            if (tolerant) {
+                pairs.push_back({kv.first, majority});
+                int minority = (int)(t.pixels - bestCount);
+                if (stats) {
+                    if (!stats->warning.empty()) stats->warning += " ";
+                    std::ostringstream w;
+                    w << "ref colour " << colourStr(cv::Vec4b(
+                            (uchar)(kv.first & 0xFF), (uchar)((kv.first >> 8) & 0xFF),
+                            (uchar)((kv.first >> 16) & 0xFF), (uchar)((kv.first >> 24) & 0xFF)))
+                      << " maps to " << t.at.size() << " user colours — majority "
+                      << "chosen, " << minority << " minority pixel(s) repaired"
+                      << " (see orange dots / 见橙点，已按主色处理)";
+                    stats->warning += w.str();
+                }
+            }
             continue;
         }
         pairs.push_back({kv.first, t.at.begin()->first});
     }
-    if (anyConflict) {
+    if (anyConflict && !tolerant) {
         if (stats) {
             stats->comparedPixels = compared;
             stats->mappedColours  = (int)pairs.size();

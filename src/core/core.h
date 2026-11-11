@@ -203,6 +203,11 @@ struct ExtractStats {
     cv::Mat maskDiffMask;       // CV_8U; 255 = alpha-mask mismatch pixel / 255=alpha 掩码不一致像素
     cv::Mat colourConflictMask; // CV_8U; 255 = minority pixel of a conflicted ref colour / 255=函数性冲突的少数派像素
     int colourConflictPixels = 0;   // set bits in colourConflictMask / colourConflictMask 的置位数
+    // Human-readable note when tolerant mode repaired a conflict (majority
+    // mapping applied). Empty on clean input or in strict mode (strict fails).
+    // 宽容模式修复冲突（多数派映射）时的可读说明。干净输入或严格模式（严格会失败）
+    // 下为空。
+    std::string warning;
 };
 
 // Transparent BGRA overlay marking the diff pixels on top of a (typically

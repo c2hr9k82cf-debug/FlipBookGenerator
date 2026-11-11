@@ -198,12 +198,30 @@ bool AppState::runPipeline() {
                     std::to_string(slot.maskDiffPx) +
                     " 像素（见缩略图红点；可点「自动对齐」或手动微调）。";
         }
+        if (slot.colourConflictPx > 0) {
+            if (!warn.empty()) warn += " ";
+            warn += std::string(viewNames[v]) + "：有 " +
+                    std::to_string(slot.colourConflictPx) +
+                    " 个像素配色不一致（见缩略图橙点），已按主色处理。";
+        }
         if (slot.align.scale > 1 || slot.align.dx != 0 || slot.align.dy != 0) {
             if (!warn.empty()) warn += " ";
             warn += std::string(viewNames[v]) + "：已按 x" +
                     std::to_string(slot.align.scale) + " 缩放、(" +
                     std::to_string(slot.align.dx) + "," +
                     std::to_string(slot.align.dy) + ") 平移对齐。";
+        }
+        // Size tolerance (v0.11.0): any input size is aligned on a best-effort
+        // basis — say so instead of silently accepting or rejecting.
+        // 尺寸宽容（v0.11.0）：任意输入尺寸尽力对齐 —— 明说，不默默接受或拒绝。
+        if (!slot.image.empty() && chipsReady && slot.image.size() != chips.cell) {
+            if (!warn.empty()) warn += " ";
+            warn += std::string(viewNames[v]) + "：输入为 " +
+                    std::to_string(slot.image.cols) + "x" +
+                    std::to_string(slot.image.rows) + "，已尽力对齐到 " +
+                    std::to_string(chips.cell.width) + "x" +
+                    std::to_string(chips.cell.height) +
+                    " 模板（建议导出 32x32 整数倍像素图）。";
         }
     }
     pipelineWarning = warn;
