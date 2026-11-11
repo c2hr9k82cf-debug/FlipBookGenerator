@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(FlipBookGenerator VERSION 0.10.0 LANGUAGES CXX)
+project(FlipBookGenerator VERSION 0.10.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -55,6 +55,7 @@ add_library(flipbook_core STATIC
     src/core/template_spec.cpp
     src/core/backinfer.cpp
     src/core/part_editor.cpp
+    src/core/compose.cpp
 )
 target_link_libraries(flipbook_core ${OPENCV_MINIMAL_LIBS})
 
@@ -238,6 +239,23 @@ add_test(
     COMMAND flipbook --fill-gate
             --templates ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates
             --assets ${CMAKE_CURRENT_SOURCE_DIR}/assets
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+# Composer gate (v0.10.1): six reference items recompose the reference views
+# byte-exact, role overrides recolour exactly, back:"auto" equals per-item
+# inference, recipes round-trip, and the composed views produce the same
+# fourdir sheet as the reference views (full chain).
+# 合成闸门（v0.10.1）：六件参考物品逐字节重合成参考视图、角色覆盖精确换色、
+# back:"auto" 等于逐物品推断、配方往返一致，合成视图出的四方向大图与参考
+# 视图一致（全链）。
+add_test(
+    NAME compose
+    COMMAND flipbook --compose-gate
+            --library ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/parts_library
+            --templates ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates
+            --assets ${CMAKE_CURRENT_SOURCE_DIR}/assets
+            --chips ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates/motion_chips
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 

@@ -1,0 +1,9 @@
+{
+  "name": "ref_pants",
+  "slot": "pants",
+  "zOrder": 10,
+  "back": "file",
+  "silhouette": "template",
+  "roleColors": [],
+  "note": "Reference character part (fixture + starter content). / 参考角色部件（夹具 + 起步内容）。"
+}

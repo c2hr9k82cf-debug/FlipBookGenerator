@@ -15,6 +15,7 @@
 #include "version.h"
 #include "core/align.h"
 #include "core/backinfer.h"
+#include "core/compose.h"
 #include "core/core.h"
 #include "core/part_editor.h"
 #include "core/parts.h"
@@ -156,6 +157,28 @@ void printCliUsage() {
         "      空白内部精确换色（描边不动）、画笔/橡皮/单步撤销逐字节往返、推断背面\n"
         "      保持 alpha 不变量与角色约束、存库 -> 读回逐字节一致。\n"
         "\n"
+        "  flipbook --compose --library DIR --recipe r.json --out DIR\n"
+        "      [--templates DIR]\n"
+        "      The customization composer (v0.10.1): assemble three\n"
+        "      template-aligned views from library items named by the recipe\n"
+        "      (back:\"file\" verbatim, back:\"auto\" inferred per item), then\n"
+        "      write front/side/back.png into --out.\n"
+        "      捏人合成器（v0.10.1）：按配方从库物品组装三张模板对齐视图\n"
+        "      （back:\"file\" 直接用、back:\"auto\" 逐物品推断），写入 --out 的\n"
+        "      front/side/back.png。\n"
+        "\n"
+        "  flipbook --compose-gate [--library DIR] [--templates DIR]\n"
+        "      [--assets DIR] [--chips DIR]\n"
+        "      Composer gate (v0.10.1): the six reference items must recompose\n"
+        "      the reference views BYTE-EXACT (reconstruction invariant), role\n"
+        "      overrides recolour exactly, back:\"auto\" equals per-item\n"
+        "      inference, recipe.json round-trips, bad recipes are refused,\n"
+        "      and the composed views run the fourdir pipeline to the SAME\n"
+        "      sheet as the reference views (full chain).\n"
+        "      合成闸门（v0.10.1）：六件参考物品必须逐字节重合成参考视图（重建\n"
+        "      不变量）、角色覆盖精确换色、back:\"auto\" 等于逐物品推断、recipe.json\n"
+        "      往返一致、坏配方被拒、合成视图走四方向管线出图与参考视图一致（全链）。\n"
+        "\n"
         "  flipbook --fourdir --front F.png --side S.png --back B.png\n"
         "      [--chips DIR] --out DIR\n"
         "      The app pipeline: extract palettes from three template-aligned\n"
@@ -204,6 +227,12 @@ struct CliArgs {
     bool partsLibraryGate   = false;
     bool backinferGate      = false;
     bool fillGate           = false;
+
+    // Composer (v0.10.1) / 合成器（v0.10.1）
+    std::string library = "tests/fixtures/parts_library";
+    std::string recipe;
+    bool compose     = false;
+    bool composeGate = false;
 };
 
 bool parseArgs(int argc, char** argv, CliArgs& a, std::string& err) {
@@ -263,6 +292,16 @@ bool parseArgs(int argc, char** argv, CliArgs& a, std::string& err) {
             a.backinferGate = true;
         } else if (s == "--fill-gate") {
             a.fillGate = true;
+        } else if (s == "--compose") {
+            a.compose = true;
+        } else if (s == "--compose-gate") {
+            a.composeGate = true;
+        } else if (s == "--library") {
+            const char* v = needValue("--library"); if (!v) return false;
+            a.library = v;
+        } else if (s == "--recipe") {
+            const char* v = needValue("--recipe"); if (!v) return false;
+            a.recipe = v;
         } else if (s == "--templates") {
             const char* v = needValue("--templates"); if (!v) return false;
             a.templates = v;
@@ -1798,6 +1837,311 @@ int runFillGate(const CliArgs& a) {
     return failures ? 1 : 0;
 }
 
+// --compose: recipe + library -> three template-aligned views on disk.
+// --compose：配方 + 部件库 -> 三张模板对齐视图落盘。
+int runCompose(const CliArgs& a) {
+    std::string err;
+    if (a.recipe.empty()) {
+        std::cerr << "FAIL: --recipe is required\n";
+        return 1;
+    }
+    fb::ComposeRecipe recipe;
+    if (!fb::loadComposeRecipe(a.recipe, recipe, err)) {
+        std::cerr << "FAIL: " << err << "\n";
+        return 1;
+    }
+    fb::TemplateSpec spec;
+    if (!fb::loadTemplateSpec(a.templates + "/" + recipe.templateName + ".json",
+                              spec, err)) {
+        std::cerr << "FAIL: " << err << "\n";
+        return 1;
+    }
+    fb::PartsLibrary lib;
+    if (!fb::loadPartsLibrary(a.library, spec.size, lib, err)) {
+        std::cerr << "FAIL: " << err << "\n";
+        return 1;
+    }
+    cv::Mat out[3];
+    if (!fb::composeThreeViews(recipe, lib, spec, out, err)) {
+        std::cerr << "FAIL: " << err << "\n";
+        return 1;
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(a.out, ec);
+    const char* names[3] = {"front.png", "side.png", "back.png"};
+    for (int v = 0; v < 3; ++v) {
+        const std::string p = a.out + "/" + names[v];
+        if (!fb::saveImageBgra(p, out[v], err)) {
+            std::cerr << "FAIL: " << err << "\n";
+            return 1;
+        }
+        std::cout << "Wrote: " << p << "\n";
+    }
+    return 0;
+}
+
+// --compose-gate: the composer's correctness gate (v0.10.1). The six
+// reference items recompose the reference views byte-exact (reconstruction
+// invariant), then every semantic contract is asserted, then the composed
+// views run the fourdir pipeline to the same sheet as the reference views.
+// --compose-gate：合成器正确性闸门（v0.10.1）。六件参考物品逐字节重合成参考
+// 视图（重建不变量），再断言全部语义契约，最后合成视图走四方向管线出图与
+// 参考视图一致。
+int runComposeGate(const CliArgs& a) {
+    namespace fs = std::filesystem;
+    int failures = 0;
+    std::string err;
+
+    fb::TemplateSpec spec;
+    if (!fb::loadTemplateSpec(a.templates + "/chibi_standard.json", spec, err)) {
+        std::cout << "template load FAILED: " << err << "   FAIL\n";
+        return 1;
+    }
+    fb::PartsLibrary lib;
+    if (!fb::loadPartsLibrary(a.library, spec.size, lib, err)) {
+        std::cout << "library load FAILED: " << err << "   FAIL\n";
+        return 1;
+    }
+
+    auto sameMat = [](const cv::Mat& x, const cv::Mat& y) {
+        return x.size() == y.size() && x.type() == y.type() &&
+               std::memcmp(x.data, y.data, x.total() * x.elemSize()) == 0;
+    };
+    auto sameAlpha = [](const cv::Mat& x, const cv::Mat& y) {
+        for (int r = 0; r < x.rows; ++r)
+            for (int c = 0; c < x.cols; ++c)
+                if (x.at<cv::Vec4b>(r, c)[3] != y.at<cv::Vec4b>(r, c)[3])
+                    return false;
+        return true;
+    };
+    auto writeText = [](const fs::path& p, const std::string& text) {
+        std::ofstream f(p, std::ios::binary | std::ios::trunc);
+        f << text;
+    };
+
+    // Full-reference recipe: every slot names its reference item.
+    // 全参考配方：每槽点名其参考物品。
+    const char* slots[6] = {"hair", "face", "top", "pants", "boots", "body"};
+    fb::ComposeRecipe ref;
+    ref.templateName = "chibi_standard";
+    for (const char* s : slots) ref.items[s] = std::string("ref_") + s;
+
+    const char* refNames[3] = {"character_32.png", "character_32_side.png",
+                               "character_32_back.png"};
+    cv::Mat refImgs[3];
+    for (int v = 0; v < 3; ++v)
+        refImgs[v] = cv::imread(a.assets + "/" + refNames[v], cv::IMREAD_UNCHANGED);
+
+    // ---- 1. reconstruction invariant ----
+    // ---- 1. 重建不变量 ----
+    cv::Mat composed[3];
+    {
+        const bool ok = fb::composeThreeViews(ref, lib, spec, composed, err);
+        int bad = 0;
+        for (int v = 0; v < 3; ++v) {
+            if (!ok || refImgs[v].empty() || !sameMat(composed[v], refImgs[v])) {
+                std::cout << "  recon view " << v
+                          << ": composed != reference   FAIL\n";
+                ++bad; ++failures;
+            }
+        }
+        if (ok && !bad)
+            std::cout << "  recon: six items recompose the reference views "
+                         "byte-exact   OK\n";
+        if (!ok) std::cout << "  recon: compose failed: " << err << "   FAIL\n";
+    }
+
+    // ---- 2. role overrides recolour exactly ----
+    // ---- 2. 角色覆盖精确换色 ----
+    {
+        fb::ComposeRecipe pink = ref;
+        fb::LibraryItem::RoleColorOverride ro;
+        ro.role = "hair_mid";
+        ro.hasSrc = true;
+        if (!spec.roleBgr("hair_mid", ro.srcBgr)) {
+            std::cout << "  palette: hair_mid missing   FAIL\n";
+            ++failures;
+        }
+        ro.dstBgr = cv::Vec3b(255, 0, 255);   // pure pink in BGR / BGR 纯粉
+        pink.roleOverrides.push_back(ro);
+        cv::Mat out[3];
+        if (!fb::composeThreeViews(pink, lib, spec, out, err)) {
+            std::cout << "  role override: compose failed: " << err << "   FAIL\n";
+            ++failures;
+        } else {
+            const cv::Mat& before = composed[0];
+            const cv::Mat& after = out[0];
+            int bad = 0, changed = 0;
+            for (int y = 0; y < before.rows; ++y)
+                for (int x = 0; x < before.cols; ++x) {
+                    const cv::Vec4b pa = before.at<cv::Vec4b>(y, x);
+                    const cv::Vec4b pb = after.at<cv::Vec4b>(y, x);
+                    const bool wasHair =
+                        pa[3] && pa[0] == ro.srcBgr[0] && pa[1] == ro.srcBgr[1] &&
+                        pa[2] == ro.srcBgr[2];
+                    if (pa[3] != pb[3]) { ++bad; continue; }
+                    if (wasHair) {
+                        if (pb[0] == 255 && pb[1] == 0 && pb[2] == 255) ++changed;
+                        else ++bad;
+                    } else if (pa != pb) ++bad;
+                }
+            if (bad || !changed) {
+                std::cout << "  role override: " << bad
+                          << " wrong pixels, " << changed
+                          << " recoloured   FAIL\n";
+                ++failures;
+            } else {
+                std::cout << "  role override: " << changed
+                          << " hair_mid pixels -> pink, rest untouched   OK\n";
+            }
+        }
+    }
+
+    // ---- 3. back:"auto" == per-item inference ----
+    // ---- 3. back:"auto" == 逐物品推断 ----
+    {
+        cv::Mat inferred;
+        fb::LibraryItem* hair = nullptr;
+        fb::PartsLibrary autoLib = lib;
+        for (auto& it : autoLib.items)
+            if (it.slot == "hair" && it.name == "ref_hair") hair = &it;
+        if (!hair) {
+            std::cout << "  back auto: ref_hair missing   FAIL\n";
+            ++failures;
+        } else {
+            inferred = fb::inferBackView(hair->views[0], hair->views[1], spec, err);
+            if (inferred.empty() || !sameAlpha(inferred, hair->views[0])) {
+                std::cout << "  back auto: inference broke the alpha invariant"
+                             "   FAIL\n";
+                ++failures;
+            }
+            hair->backMode = "auto";
+            hair->views[2] = cv::Mat();   // no hand-drawn back / 无手绘背面
+            cv::Mat outA[3], outB[3];
+            const bool okA = fb::composeThreeViews(ref, autoLib, spec, outA, err);
+            fb::PartsLibrary fileLib = lib;
+            for (auto& it : fileLib.items)
+                if (it.slot == "hair" && it.name == "ref_hair")
+                    it.views[2] = inferred;   // inference fed as a file sprite
+            const bool okB = fb::composeThreeViews(ref, fileLib, spec, outB, err);
+            if (!okA || !okB || !sameMat(outA[2], outB[2])) {
+                std::cout << "  back auto: compose(auto) != compose(inference"
+                             " as file)   FAIL\n";
+                ++failures;
+            } else if (sameMat(outA[2], composed[2])) {
+                std::cout << "  back auto: output identical to hand-drawn — "
+                             "inference not actually used   FAIL\n";
+                ++failures;
+            } else {
+                std::cout << "  back auto: per-item inference, alpha invariant"
+                             "   OK\n";
+            }
+        }
+    }
+
+    // ---- 4. recipe.json round-trip ----
+    // ---- 4. recipe.json 往返 ----
+    {
+        const fs::path tmp =
+            fs::temp_directory_path() / "flipbook_recipe_gate.json";
+        fb::ComposeRecipe r;
+        r.templateName = "chibi_alt";
+        r.items["hair"] = "ref_hair";
+        r.items["top"] = "ref_top";
+        fb::LibraryItem::RoleColorOverride ro1;
+        ro1.role = "hair_mid";
+        ro1.hasSrc = true;
+        ro1.srcBgr = cv::Vec3b(1, 2, 3);
+        ro1.dstBgr = cv::Vec3b(4, 5, 6);
+        fb::LibraryItem::RoleColorOverride ro2;
+        ro2.role = "skin";
+        ro2.hasSrc = false;
+        ro2.dstBgr = cv::Vec3b(7, 8, 9);
+        r.roleOverrides = {ro1, ro2};
+        bool ok = fb::saveComposeRecipe(tmp.string(), r, err);
+        fb::ComposeRecipe loaded;
+        if (ok) ok = fb::loadComposeRecipe(tmp.string(), loaded, err);
+        if (!ok || loaded.templateName != "chibi_alt" ||
+            loaded.items.size() != 2 || loaded.items["hair"] != "ref_hair" ||
+            loaded.items["top"] != "ref_top" ||
+            loaded.roleOverrides.size() != 2 ||
+            !loaded.roleOverrides[0].hasSrc ||
+            loaded.roleOverrides[0].srcBgr != cv::Vec3b(1, 2, 3) ||
+            loaded.roleOverrides[0].dstBgr != cv::Vec3b(4, 5, 6) ||
+            loaded.roleOverrides[1].hasSrc ||
+            loaded.roleOverrides[1].dstBgr != cv::Vec3b(7, 8, 9)) {
+            std::cout << "  recipe round-trip: mismatch (" << err << ")   FAIL\n";
+            ++failures;
+        } else {
+            std::cout << "  recipe round-trip: save -> load fields intact   OK\n";
+        }
+        fs::remove(tmp);
+    }
+
+    // ---- 5. bad recipes are refused ----
+    // ---- 5. 坏配方被拒 ----
+    {
+        int bad = 0;
+        const fs::path tmp =
+            fs::temp_directory_path() / "flipbook_recipe_bad.json";
+        // Unknown slot name in items. / items 里的槽名未知。
+        writeText(tmp, "{\"items\": {\"hat\": \"ref_hair\"}}\n");
+        fb::ComposeRecipe r;
+        if (fb::loadComposeRecipe(tmp.string(), r, err)) ++bad;
+        // Unknown item name. / 物品名未知。
+        fb::ComposeRecipe missing = ref;
+        missing.items["hair"] = "no_such_item";
+        cv::Mat out[3];
+        if (fb::composeThreeViews(missing, lib, spec, out, err)) ++bad;
+        // Role override with no src and a role outside the palette. /
+        // 覆盖无 src 且角色不在 palette。
+        fb::ComposeRecipe badRole = ref;
+        fb::LibraryItem::RoleColorOverride ro;
+        ro.role = "made_up_role";
+        ro.hasSrc = false;
+        ro.dstBgr = cv::Vec3b(0, 0, 0);
+        badRole.roleOverrides.push_back(ro);
+        if (fb::composeThreeViews(badRole, lib, spec, out, err)) ++bad;
+        fs::remove(tmp);
+        if (bad) {
+            std::cout << "  bad recipes: " << bad << " accepted   FAIL\n";
+            ++failures;
+        } else {
+            std::cout << "  bad recipes: unknown slot / item / role all refused"
+                         "   OK\n";
+        }
+    }
+
+    // ---- 6. full chain: composed views == reference views through the
+    //         fourdir pipeline (same sheet, byte-exact) ----
+    // ---- 6. 全链：合成视图经四方向管线出图 == 参考视图出图（逐字节） ----
+    {
+        fb::ChipSet chips;
+        if (!fb::loadChipSet(a.chips, chips, err)) {
+            std::cout << "  full chain: chips load failed: " << err << "   FAIL\n";
+            ++failures;
+        } else {
+            fb::FourDirResult r1, r2;
+            std::string e1, e2;
+            const bool ok1 = fb::buildFourDirSheet(
+                composed[0], composed[1], composed[2], chips, r1, e1);
+            const bool ok2 = fb::buildFourDirSheet(
+                refImgs[0], refImgs[1], refImgs[2], chips, r2, e2);
+            if (!ok1 || !ok2 || !sameMat(r1.sheet, r2.sheet)) {
+                std::cout << "  full chain: sheet mismatch (" << e1 << " / "
+                          << e2 << ")   FAIL\n";
+                ++failures;
+            } else {
+                std::cout << "  full chain: compose -> fourdir sheet matches "
+                             "the reference chain byte-exact   OK\n";
+            }
+        }
+    }
+
+    std::cout << (failures ? "COMPOSE GATE FAIL\n" : "COMPOSE GATE OK\n");
+    return failures ? 1 : 0;
+}
+
 int runPaletteGate(const CliArgs& a) {
     fb::ChipSet cs;
     std::string err;
@@ -2153,6 +2497,8 @@ int runCli(int argc, char** argv) {
     if (a.partsLibraryGate)   return runPartsLibraryGate(a);
     if (a.backinferGate)      return runBackinferGate(a);
     if (a.fillGate)           return runFillGate(a);
+    if (a.compose)     return runCompose(a);
+    if (a.composeGate) return runComposeGate(a);
     if (a.fourdir)     return runFourdir(a);
     if (a.allPresets)  return runPresets(a, {"idle", "walk_side", "walk_front", "walk_up"});
     if (!a.preset.empty()) return runPresets(a, {a.preset});
