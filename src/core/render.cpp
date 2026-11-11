@@ -357,7 +357,8 @@ void fillInteriorHoles(cv::Mat& frame, cv::Mat& owner) {
 // 单位位姿下每个部件都严丝合缝地贴着邻居，不存在跨部件的空段，于是这里是恒等
 // 操作。重建不变量因此不受影响 —— 三套 rig 的 --recon-test 都验过。
 void fillJointPinches(cv::Mat& frame, const cv::Mat& owner, const cv::Mat& source,
-                      int shiftX, int shiftY) {
+                      int shiftX, int shiftY,
+                      const std::vector<cv::Rect>& hiddenBoxes) {
     const int W = frame.cols, H = frame.rows;
     const bool haveSource = !source.empty()
         && source.rows == H && source.cols == W;
@@ -400,12 +401,40 @@ void fillJointPinches(cv::Mat& frame, const cv::Mat& owner, const cv::Mat& sourc
                 const int syy = yy - shiftY, sxx = x - shiftX;
                 if (syy < 0 || syy >= H || sxx < 0 || sxx >= W) { lost = false; break; }
                 if (source.at<cv::Vec4b>(syy, sxx)[3] == 0) { lost = false; break; }
+                // A part hidden this frame leaves its source pixels transparent
+                // ON PURPOSE (the far arm the torso occludes). Restoring them
+                // would redraw the arm we just hid, so treat these as not-lost.
+                // 本帧被隐藏的部件【故意】让它的源像素透明（被躯干遮挡的远端手臂）。
+                // 还原它们会把刚隐藏的手臂重画出来，所以当作"没丢"。
+                bool inHidden = false;
+                for (const cv::Rect& hb : hiddenBoxes) {
+                    if (hb.contains(cv::Point(sxx, syy))) { inHidden = true; break; }
+                }
+                if (inHidden) { lost = false; break; }
             }
             if (!lost) continue;
 
             for (int yy = y0; yy <= y1; ++yy) {
                 frame.at<cv::Vec4b>(yy, x) =
                     ((yy - y0) <= (y1 - yy)) ? above : below;
+            }
+        }
+    }
+}
+
+// One palette-swap pass: replace each `from` colour with its `to`. Exact BGRA
+// match — pixel art has no blending, so a pixel is either the tone or it is not.
+// Drives the pants two-tone trade (ANIMATION_SPEC §5); leg shapes stay put.
+// 一次调色板换色：把每个 `from` 色替换成 `to`。精确 BGRA 匹配 —— 像素风无混合，
+// 像素要么是该色、要么不是。驱动裤子两主色互换（ANIMATION_SPEC §5）；腿形不动。
+void applySwaps(cv::Mat& frame,
+                const std::vector<std::pair<cv::Vec4b, cv::Vec4b>>& swaps) {
+    if (swaps.empty()) return;
+    for (int y = 0; y < frame.rows; ++y) {
+        cv::Vec4b* row = frame.ptr<cv::Vec4b>(y);
+        for (int x = 0; x < frame.cols; ++x) {
+            for (const auto& sw : swaps) {
+                if (row[x] == sw.first) { row[x] = sw.second; break; }
             }
         }
     }
@@ -419,15 +448,27 @@ cv::Mat composeFrame(const Rig& rig, const Pose& pose) {
     // 每个像素是谁画的（0 = 没人）。补缝需要它。
     cv::Mat owner = cv::Mat::zeros(rig.size.height, rig.size.width, CV_8U);
 
+    // Source-space boxes of parts hidden this frame. A hidden part's pixels are
+    // still opaque in the source, so the tear repair must not "restore" them.
+    // 本帧隐藏部件的原图包围盒。隐藏部件在原图里仍不透明，补缝不能把它们"还原"。
+    std::vector<cv::Rect> hiddenBoxes;
+
     for (int zi = 0; zi < PART_COUNT; ++zi) {
         const int i = rig.zOrder[zi] - 1;          // zOrder stores part ids
         if (i < 0 || i >= PART_COUNT) continue;
         if (!rig.present[i]) continue;
+        if (pose.hidden[i]) { hiddenBoxes.push_back(rig.bbox[i]); continue; }
 
         const Affine2D m = Affine2D::from(pose.parts[i], rig.pivots[i],
                                           pose.rootX, pose.rootY);
         blitPart(frame, owner, i + 1, rig.parts[i], rig.bbox[i], m);
     }
+    // Per-frame palette swap (the pants two-tone trade). Applied here, after
+    // rasterising and BEFORE the seam repairs, so repaired pixels inherit the
+    // already-swapped colours rather than a stale tone.
+    // 逐帧调色板换色（裤子两主色互换）。在此应用 —— 光栅化后、缝修补【前】，
+    // 让修补出的像素继承换过的颜色，而不是旧色。
+    applySwaps(frame, pose.swaps);
     fillInteriorHoles(frame, owner);                  // enclosed seams / 封闭缝
     // Tears are judged against the source in ITS OWN frame, so undo the pose's
     // global translation before looking a pixel up. Rounds the same way the
@@ -435,7 +476,8 @@ cv::Mat composeFrame(const Rig& rig, const Pose& pose) {
     // 撕裂要拿【原图自己的参考系】来判，所以查像素前先撤掉位姿的整体平移。
     // 取整方式与光栅化器一致，否则在 .5 处会对不上。
     fillJointPinches(frame, owner, rig.source,
-                     (int)std::lround(pose.rootX), (int)std::lround(pose.rootY));
+                     (int)std::lround(pose.rootX), (int)std::lround(pose.rootY),
+                     hiddenBoxes);
     return frame;
 }
 

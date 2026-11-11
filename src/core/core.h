@@ -92,6 +92,33 @@ struct Pose {
     std::array<PartTransform, PART_COUNT> parts;
     float rootX = 0.f;
     float rootY = 0.f;
+
+    // Per-frame visibility. hidden[i] = do not draw part (i+1) this frame —
+    // used for the far arm the torso occludes on some walk frames.
+    // 逐帧可见性。hidden[i] = 本帧不画第 (i+1) 个部件 —— 用于某些行走帧里被躯干
+    // 遮挡的远端手臂。
+    std::array<bool, PART_COUNT> hidden{};
+
+    // Per-frame palette swap: (from -> to) BGRA pairs, applied once after
+    // rasterising and before the seam repairs. Drives the pants two-tone swap;
+    // two tones trading places is just two entries that are each other's
+    // inverse. Keeps the leg shapes untouched — only colour changes.
+    // 逐帧调色板换色：(from -> to) BGRA 对，光栅化后、缝修补前应用一次。
+    // 驱动裤子两主色换色；两个色互换就是两条互为反向的记录。腿的形状完全不动，
+    // 只换颜色。
+    std::vector<std::pair<cv::Vec4b, cv::Vec4b>> swaps;
+};
+
+// Reserved slot for hand-drawn per-frame chips (Tier B). Hip (y18-22) and boots
+// (y26-31) are hand-redrawn per frame on the reference sheet; rules approximate
+// them now, and a chip here can replace that slot's rule approximation later.
+// 为逐帧手绘芯片（Tier B）预留的槽位。参考图里髋部（y18-22）和靴（y26-31）逐帧
+// 手绘；本轮用规则近似，日后此芯片可替换该槽位的规则近似。
+struct VariantChip {
+    enum class Slot { Hip, Boot };
+    Slot             slot   = Slot::Hip;    // which region / 哪个区域
+    int              bindTo = PART_BODY;    // part id it rides on / 跟随的部件 id
+    std::vector<cv::Mat> frames;            // one BGRA chip per frame / 每帧一张 BGRA 芯片
 };
 
 struct Keyframe {
