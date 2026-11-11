@@ -16,3 +16,6 @@ output/
 # Python bytecode / Python 字节码
 __pycache__/
 *.pyc
+
+# ImGui window layout cache (runtime) / ImGui 窗口布局缓存（运行时）
+imgui.ini

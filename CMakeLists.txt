@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(FlipBookGenerator VERSION 0.7.2 LANGUAGES CXX)
+project(FlipBookGenerator VERSION 0.8.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -121,3 +121,68 @@ add_test(
             --map ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates/motion_chips/palette_map.txt
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
+
+# ---------------------------------------------------------------------------
+# GUI (macOS desktop app) / GUI（macOS 桌面应用）
+#
+# Optional (FetchContent pulls GLFW/ImGui on first configure, needs network).
+# core and the tests never include UI headers — the CLAUDE.md iron rule.
+# 可选（FetchContent 首次 configure 拉 GLFW/ImGui，需网络）。
+# core 与测试永不 include UI 头 —— CLAUDE.md 铁律。
+# ---------------------------------------------------------------------------
+option(FLIPBOOK_BUILD_GUI "Build the ImGui macOS desktop app" ON)
+if(FLIPBOOK_BUILD_GUI)
+    include(FetchContent)
+
+    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+
+    # Pinned for reproducibility. imgui v1.91.9 is the last with the classic
+    # ImTextureID texture API (v1.92 introduced ImTextureRef). GLFW 3.4 is the
+    # current stable with native arm64 Cocoa support.
+    # 钉死版本保证可复现。imgui v1.91.9 是最后一个经典 ImTextureID 纹理 API 的版本
+    # （v1.92 引入 ImTextureRef）。GLFW 3.4 是原生支持 arm64 Cocoa 的稳定版。
+    FetchContent_Declare(glfw
+        GIT_REPOSITORY https://github.com/glfw/glfw.git
+        GIT_TAG 3.4 GIT_SHALLOW TRUE)
+    FetchContent_Declare(imgui
+        GIT_REPOSITORY https://github.com/ocornut/imgui.git
+        GIT_TAG v1.91.9-docking GIT_SHALLOW TRUE)
+    # glfw has a CMakeLists (gets a target); imgui does not (sources only — we
+    # build a static lib below). MakeAvailable skips add_subdirectory when the
+    # fetched content has no CMakeLists.txt.
+    # glfw 有 CMakeLists（出 target）；imgui 没有（只取源码 —— 下面自己编静态库）。
+    # 内容无 CMakeLists.txt 时 MakeAvailable 跳过 add_subdirectory。
+    FetchContent_MakeAvailable(glfw imgui)
+
+    find_package(OpenGL REQUIRED)
+
+    # Dear ImGui as a static lib (upstream ships no CMake). Core + GLFW/OpenGL3
+    # backends. / ImGui 静态库（上游无 CMake）：核心 + GLFW/OpenGL3 后端。
+    add_library(imgui STATIC
+        ${imgui_SOURCE_DIR}/imgui.cpp
+        ${imgui_SOURCE_DIR}/imgui_draw.cpp
+        ${imgui_SOURCE_DIR}/imgui_tables.cpp
+        ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+        ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+        ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
+    )
+    target_include_directories(imgui PUBLIC
+        ${imgui_SOURCE_DIR}
+        ${imgui_SOURCE_DIR}/backends
+    )
+    target_link_libraries(imgui PUBLIC glfw OpenGL::GL)
+    target_compile_definitions(imgui PUBLIC GL_SILENCE_DEPRECATION=1)
+
+    # v0.8.0 day-one spike gate: window + textured quad (GL_NEAREST x8) + live
+    # mouse coords. Proves GLFW/OpenGL3 on arm64 before any panel is written.
+    # v0.8.0 day-one 闸门：窗口 + 纹理四边形（GL_NEAREST x8）+ 实时鼠标坐标。
+    # 写任何面板前先证明 GLFW/OpenGL3 在 arm64 能跑。
+    add_executable(ui_spike
+        src/ui/spike_main.cpp
+        src/ui/texture.cpp
+    )
+    target_link_libraries(ui_spike imgui ${OpenCV_LIBS})
+endif()
