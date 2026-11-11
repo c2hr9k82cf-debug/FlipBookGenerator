@@ -75,6 +75,29 @@ int main() {
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     (void)io;
+
+    // The UI is Chinese — ImGui's default font has no CJK glyphs (every
+    // character would render as a tofu box). Load a system Chinese font; every
+    // macOS ships PingFang, so nothing needs bundling.
+    // 界面是中文 —— ImGui 默认字体没有中文字形（会全部显示成豆腐块）。
+    // 加载系统中文字体；每台 macOS 都自带苹方，无需打包字体。
+    {
+        const char* kFontCandidates[] = {
+            "/System/Library/Fonts/PingFang.ttc",
+            "/System/Library/Fonts/Hiragino Sans GB.ttc",
+            "/System/Library/Fonts/STHeiti Light.ttc",
+        };
+        for (const char* fp : kFontCandidates) {
+            if (std::FILE* f = std::fopen(fp, "rb")) {
+                std::fclose(f);
+                io.Fonts->AddFontFromFileTTF(
+                    fp, 18.0f, nullptr,
+                    io.Fonts->GetGlyphRangesChineseSimplifiedCommon());
+                break;
+            }
+        }
+        if (io.Fonts->Fonts.empty()) io.Fonts->AddFontDefault();
+    }
     // No multi-viewport (macOS NSWindow focus quirks) — single window.
     // 不开 multi-viewport（macOS NSWindow 焦点坑）—— 单窗口。
     ImGui::StyleColorsDark();

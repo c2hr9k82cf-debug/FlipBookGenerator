@@ -25,9 +25,8 @@ bool AppState::ensureChips() {
     if (chipsDir.empty()) chipsDir = findChipsDir();
     if (chipsDir.empty()) {
         chipsError =
-            "motion_chips not found. Set FLIPBOOK_ASSETS or run from the "
-            "project root. / 找不到 motion_chips。请设 FLIPBOOK_ASSETS 或在项目"
-            "根目录运行。";
+            "找不到动作芯片（motion_chips）。请设置环境变量 FLIPBOOK_ASSETS，"
+            "或在项目根目录运行。";
         status = chipsError;
         return false;
     }
@@ -48,7 +47,7 @@ bool AppState::setView(int idx, const std::string& path) {
     if (!fb::loadImageBgra(path, img)) {
         views[idx].path = path;
         views[idx].image = cv::Mat();
-        pipelineError = "cannot load image: " + path;
+        pipelineError = "无法加载图片：" + path;
         status = pipelineError;
         ++revision;
         return false;
@@ -68,8 +67,8 @@ bool AppState::runPipeline() {
     if (!views[FRONT].loaded() || !views[SIDE].loaded() || !views[BACK].loaded()) {
         int have = 0;
         for (const ViewSlot& v : views) if (v.loaded()) ++have;
-        status = std::to_string(have) + " / 3 views loaded — drop or choose the rest."
-                 " / 已载入 " + std::to_string(have) + " / 3 张 —— 拖入或选择其余视图。";
+        status = "已载入 " + std::to_string(have) +
+                 " / 3 张视图 —— 拖入或点「选择」补齐其余视图。";
         return false;
     }
 
@@ -80,14 +79,14 @@ bool AppState::runPipeline() {
                                views[BACK].image, chips, result, err)) {
         result = fb::FourDirResult{};
         pipelineError = err;
-        status = "Pipeline failed / 管线失败: " + err;
+        status = "管线失败：" + err;
         return false;
     }
     hasResult = true;
-    status = "Sheet ready: " + std::to_string(result.sheet.cols) + "x" +
-             std::to_string(result.sheet.rows) + " (" +
-             std::to_string(fb::SHEET_ROWS) + " rows x " +
-             std::to_string(fb::SHEET_COLS) + " cols). / 大图就绪。";
+    status = "大图就绪：" + std::to_string(result.sheet.cols) + "x" +
+             std::to_string(result.sheet.rows) + "（" +
+             std::to_string(fb::SHEET_ROWS) + " 行 x " +
+             std::to_string(fb::SHEET_COLS) + " 列）。";
     return true;
 }
 
@@ -98,7 +97,7 @@ bool AppState::exportSheet(const std::string& path) {
         status = err;
         return false;
     }
-    status = "Exported: " + path;
+    status = "已导出：" + path;
     return true;
 }
 
