@@ -19,3 +19,14 @@ __pycache__/
 
 # ImGui window layout cache (runtime) / ImGui 窗口布局缓存（运行时）
 imgui.ini
+
+# Generated showcase pages (rebuild: tools/make_*_showcase.py) / 展示页生成物
+flipbooks.html
+flipbooks_tierb.html
+
+# Review-tool scratch / 代码审查工具临时产物
+.review-build/
+--help/
+
+# Stray downloaded images / 误下载的散图
+09d46502714b463788ad0eb9a23ae0f9.png
