@@ -109,8 +109,10 @@ bool buildFourDirSheet(const cv::Mat& front, const cv::Mat& side, const cv::Mat&
         // view's chips use (the coverage check below keeps watch).
         // 配色提取对 idle 第 0 帧做 —— 它覆盖该视图芯片用到的全部颜色
         // （下面的覆盖检查负责把关）。
-        if (!extractPaletteMap(*views[v], idles[v]->frames[0], out.maps[v], err))
+        if (!extractPaletteMap(*views[v], idles[v]->frames[0], out.maps[v], err)) {
+            err = std::string(viewNames[v]) + " view: " + err;
             return false;
+        }
 
         idleFrames[v] = renderFromChips(*idles[v], out.maps[v]);
         walkFrames[v] = renderFromChips(*walks[v], out.maps[v]);

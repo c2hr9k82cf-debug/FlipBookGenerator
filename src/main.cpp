@@ -21,6 +21,7 @@
 #include <opencv2/imgproc.hpp>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <iostream>
 #include <set>
 #include <string>
@@ -932,6 +933,8 @@ int runFourdir(const CliArgs& a) {
     }
 
     const std::string outPath = a.out + "/fourdir_sheet.png";
+    std::error_code ec;
+    std::filesystem::create_directories(a.out, ec);   // out dir may not exist yet / 输出目录可能还不存在
     if (!fb::saveImageBgra(outPath, res.sheet, err)) {
         std::cerr << "FAIL: " << err << "\n";
         return 1;

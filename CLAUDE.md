@@ -423,7 +423,7 @@ cd ..
 ./build/flipbook
 ```
 
-Requires CMake 3.14+, C++17, OpenCV 4.x (Homebrew: `/opt/homebrew`), macOS + VSCode.
+Requires CMake 3.18+, C++17, OpenCV 4.x (Homebrew: `/opt/homebrew`), macOS + VSCode.
 
 ## Conventions / 约定
 

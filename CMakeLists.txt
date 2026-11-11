@@ -1,5 +1,5 @@
-cmake_minimum_required(VERSION 3.14)
-project(FlipBookGenerator VERSION 0.8.1 LANGUAGES CXX)
+cmake_minimum_required(VERSION 3.18)
+project(FlipBookGenerator VERSION 0.8.2 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -177,12 +177,30 @@ if(FLIPBOOK_BUILD_GUI)
     FetchContent_Declare(imgui
         GIT_REPOSITORY https://github.com/ocornut/imgui.git
         GIT_TAG v1.91.9-docking GIT_SHALLOW TRUE)
+    FetchContent_Declare(pfd
+        GIT_REPOSITORY https://github.com/samhocevar/portable-file-dialogs.git
+        GIT_TAG 0.1.0 GIT_SHALLOW TRUE
+        # SOURCE_SUBDIR pointing at a nonexistent dir stops MakeAvailable from
+        # add_subdirectory-ing upstream's ancient CMakeLists (CMake 4 refuses
+        # its low policy floor). We only want the header.
+        # SOURCE_SUBDIR 指向不存在的目录，阻止 MakeAvailable 执行上游那个古老
+        # CMakeLists（CMake 4 拒绝它过低的 policy 下限）。我们只要那个头文件。
+        SOURCE_SUBDIR __no_cmake_here__)
     # glfw has a CMakeLists (gets a target); imgui does not (sources only — we
     # build a static lib below). MakeAvailable skips add_subdirectory when the
     # fetched content has no CMakeLists.txt.
     # glfw 有 CMakeLists（出 target）；imgui 没有（只取源码 —— 下面自己编静态库）。
     # 内容无 CMakeLists.txt 时 MakeAvailable 跳过 add_subdirectory。
-    FetchContent_MakeAvailable(glfw imgui)
+    FetchContent_MakeAvailable(glfw imgui pfd)
+
+    # portable-file-dialogs is a single header (native dialogs via osascript on
+    # macOS). The upstream repo may or may not ship a CMake target — provide one.
+    # portable-file-dialogs 是单头文件（macOS 上经 osascript 弹原生对话框）。
+    # 上游仓库不一定带 CMake target —— 这里补一个。
+    if(NOT TARGET portable-file-dialogs)
+        add_library(portable-file-dialogs INTERFACE)
+        target_include_directories(portable-file-dialogs INTERFACE ${pfd_SOURCE_DIR})
+    endif()
 
     find_package(OpenGL REQUIRED)
 
@@ -212,4 +230,18 @@ if(FLIPBOOK_BUILD_GUI)
         src/ui/texture.cpp
     )
     target_link_libraries(ui_spike imgui ${OpenCV_LIBS})
+
+    # The GUI app: three views in, one four-direction sheet PNG out. Thin shell
+    # over flipbook_core — the GUI must export byte-identical to the CLI.
+    # GUI 应用：三视图进，一张四方向大图 PNG 出。flipbook_core 的薄壳 ——
+    # GUI 导出必须与 CLI 逐字节一致。
+    add_executable(flipbook_gui
+        src/ui/main.cpp
+        src/ui/panels.cpp
+        src/ui/app_state.cpp
+        src/ui/assets_locator.cpp
+        src/ui/texture.cpp
+    )
+    target_link_libraries(flipbook_gui
+        flipbook_core imgui portable-file-dialogs ${OpenCV_LIBS})
 endif()
