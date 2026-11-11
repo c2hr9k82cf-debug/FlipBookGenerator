@@ -73,6 +73,31 @@ void printCliUsage() {
         "      Render every flipbook from the chips. Empty map = original.\n"
         "      从芯片渲染全部翻页书。空映射 = 原版。\n"
         "\n"
+        "  flipbook --palette-gate [--chips DIR] [--map palette_map.txt]\n"
+        "      [--front NEG.png --side NEG.png --back NEG.png]\n"
+        "      Palette-extraction gate. Positive: synthesise a user view per view\n"
+        "      (map applied to idle frame 0), extract it back, require the exact\n"
+        "      round trip. Negative: a one-pixel third colour must be REJECTED,\n"
+        "      and so must the --front/--side/--back images when given (the alt\n"
+        "      character is the fixture for that).\n"
+        "      配色提取闸门。正向：每视图合成用户图（对 idle f0 应用映射），提取回来\n"
+        "      必须精确往返。负向：单像素第三色必须被拒绝；给了 --front/--side/--back\n"
+        "      时它们也必须被拒绝（换皮角色图就是它的夹具）。\n"
+        "\n"
+        "  flipbook --fourdir-gate [--chips DIR] [--map palette_map.txt]\n"
+        "      Four-direction sheet gate: 8x6 layout, idle cycle-fill (f0 f1 f0\n"
+        "      f1 f0 f1), left rows = mirrored right rows, alpha masks preserved,\n"
+        "      and every opaque colour is a palette-map destination.\n"
+        "      四方向大图闸门：8x6 布局、待机循环补帧（f0 f1 f0 f1 f0 f1）、left 行\n"
+        "      = right 行镜像、alpha 掩码不变、非透明色全部是映射目标色。\n"
+        "\n"
+        "  flipbook --fourdir --front F.png --side S.png --back B.png\n"
+        "      [--chips DIR] --out DIR\n"
+        "      The app pipeline: extract palettes from three template-aligned\n"
+        "      views, reskin the chips, write the 8x6 four-direction sheet PNG.\n"
+        "      app 管线：从三张模板对齐视图提取配色、给芯片换皮、写出 8x6 四方向\n"
+        "      大图 PNG。\n"
+        "\n"
         "  flipbook --help\n"
         "\n"
         "Without arguments, the interactive menu opens.\n"
@@ -95,6 +120,12 @@ struct CliArgs {
     bool chipRecon  = false;
     bool chipReskin = false;
     bool chipRender = false;
+
+    // Four-direction sheet (the .app pipeline) / 四方向大图（app 管线）
+    std::string frontImg, sideImg, backImg;   // user views / 用户三视图
+    bool paletteGate = false;
+    bool fourdirGate = false;
+    bool fourdir     = false;
 };
 
 bool parseArgs(int argc, char** argv, CliArgs& a, std::string& err) {
@@ -137,6 +168,21 @@ bool parseArgs(int argc, char** argv, CliArgs& a, std::string& err) {
         } else if (s == "--sheet") {
             const char* v = needValue("--sheet"); if (!v) return false;
             a.sheet = v;
+        } else if (s == "--palette-gate") {
+            a.paletteGate = true;
+        } else if (s == "--fourdir-gate") {
+            a.fourdirGate = true;
+        } else if (s == "--fourdir") {
+            a.fourdir = true;
+        } else if (s == "--front") {
+            const char* v = needValue("--front"); if (!v) return false;
+            a.frontImg = v;
+        } else if (s == "--side") {
+            const char* v = needValue("--side"); if (!v) return false;
+            a.sideImg = v;
+        } else if (s == "--back") {
+            const char* v = needValue("--back"); if (!v) return false;
+            a.backImg = v;
         } else if (s == "--help" || s == "-h") {
             err = "help";
             return false;
@@ -532,6 +578,375 @@ int runChipRender(const CliArgs& a) {
     return failures ? 1 : 0;
 }
 
+// ---------------------------------------------------------------------------
+// Palette extraction gate / 配色提取闸门
+// ---------------------------------------------------------------------------
+
+// Count a ref cell's distinct non-transparent colours (as sorted keys).
+// 统计参考格的不同非透明颜色（排序键）。
+std::set<uint32_t> opaqueColourKeys(const cv::Mat& img) {
+    std::set<uint32_t> keys;
+    for (int y = 0; y < img.rows; ++y) {
+        const cv::Vec4b* row = img.ptr<cv::Vec4b>(y);
+        for (int x = 0; x < img.cols; ++x)
+            if (row[x][3] != 0) keys.insert(colourKey(row[x]));
+    }
+    return keys;
+}
+
+// Alpha-mask equality: transparent vs opaque at every pixel. RGB ignored.
+// alpha 掩码相等：逐像素透明/不透明一致。忽略 RGB。
+bool alphaMaskEqual(const cv::Mat& a, const cv::Mat& b) {
+    if (a.size() != b.size()) return false;
+    for (int y = 0; y < a.rows; ++y) {
+        const cv::Vec4b* pa = a.ptr<cv::Vec4b>(y);
+        const cv::Vec4b* pb = b.ptr<cv::Vec4b>(y);
+        for (int x = 0; x < a.cols; ++x)
+            if ((pa[x][3] != 0) != (pb[x][3] != 0)) return false;
+    }
+    return true;
+}
+
+// The palette-extraction gate. Positive: synthesise the ideal user image per
+// view (the palette map applied to idle frame 0) and require extractPaletteMap
+// to round-trip it exactly. Negative: the extractor must REJECT a one-pixel
+// third colour, and must reject the --front/--side/--back images when given
+// (assets/character_alt*.png is the committed fixture that fails strict
+// extraction — real AI images must be anti-alias-free and template-aligned).
+// 配色提取闸门。正向：每视图合成理想用户图（对 idle f0 应用调色板映射），
+// extractPaletteMap 必须精确往返。负向：提取器必须拒绝"单像素第三色"，且给了
+// --front/--side/--back 时必须拒绝它们（assets/character_alt*.png 就是过不了
+// 严格提取的已提交夹具 —— 真实 AI 图必须无抗锯齿、模板对齐）。
+int runPaletteGate(const CliArgs& a) {
+    fb::ChipSet cs;
+    std::string err;
+    if (!fb::loadChipSet(a.chips, cs, err)) { std::cerr << "FAIL: " << err << "\n"; return 1; }
+    fb::PaletteMap map;
+    if (!fb::loadPaletteMap(a.map, map, err)) { std::cerr << "FAIL: " << err << "\n"; return 1; }
+
+    // The map must be a function on its own: one source colour, one target.
+    // 映射本身必须是函数：一个源色只能有一个目标色。
+    std::map<uint32_t, cv::Vec4b> mapBySrc;
+    for (const auto& sw : map) {
+        const auto it = mapBySrc.find(colourKey(sw.first));
+        if (it != mapBySrc.end() && it->second != sw.second) {
+            std::cerr << "FAIL: palette map sends one source colour to two targets\n";
+            return 1;
+        }
+        mapBySrc[colourKey(sw.first)] = sw.second;
+    }
+
+    std::cout << "Chips: " << a.chips << "\nMap:   " << a.map
+              << " (" << map.size() << " entries)\n\n";
+
+    const char* viewNames[3] = {"front", "side", "back"};
+    const char* negSuffix[3] = {"", "_side", "_back"};
+    int failures = 0;
+
+    for (int v = 0; v < 3; ++v) {
+        const fb::MotionChips* idle = cs.find(std::string(viewNames[v]) + "_idle");
+        const fb::MotionChips* walk = cs.find(std::string(viewNames[v]) + "_walk");
+        if (!idle || !walk) {
+            std::cout << "  " << viewNames[v] << ": chip set missing flipbooks   FAIL\n";
+            ++failures;
+            continue;
+        }
+        const cv::Mat& ref0 = idle->frames[0];
+
+        // ---- positive: exact round trip / 正向：精确往返 ----
+        cv::Mat user = ref0.clone();
+        fb::applyPaletteMap(user, map);
+
+        fb::PaletteMap extracted;
+        fb::ExtractStats st;
+        if (!fb::extractPaletteMap(user, ref0, extracted, err, &st)) {
+            std::cout << "  " << viewNames[v] << ": extraction FAILED on the synthetic "
+                      << "input: " << err << "   FAIL\n";
+            ++failures;
+            continue;
+        }
+
+        // Expected: exactly the map entries whose source appears in ref0.
+        // 期望：恰好是"源色出现在 ref0 里"的那些映射条目。
+        const std::set<uint32_t> refKeys = opaqueColourKeys(ref0);
+        std::map<uint32_t, uint32_t> expected, got;
+        for (const auto& kv : mapBySrc)
+            if (refKeys.count(kv.first))
+                expected[kv.first] = colourKey(kv.second);
+        for (const auto& sw : extracted)
+            got[colourKey(sw.first)] = colourKey(sw.second);
+
+        const int opaquePixels = st.comparedPixels;
+        bool ok = (st.maskDiffPixels == 0) && (got == expected);
+        int refOpaque = 0;
+        for (int y = 0; y < ref0.rows; ++y) {
+            const cv::Vec4b* row = ref0.ptr<cv::Vec4b>(y);
+            for (int x = 0; x < ref0.cols; ++x) if (row[x][3] != 0) ++refOpaque;
+        }
+        ok = ok && (opaquePixels == refOpaque);
+
+        std::cout << "  " << viewNames[v] << ": round trip "
+                  << extracted.size() << " colours / " << opaquePixels << " px";
+        if (!ok) {
+            std::cout << "   FAIL (map mismatch or pixel count)\n";
+            ++failures;
+        } else {
+            std::cout << "   OK\n";
+        }
+
+        // ---- negative 1: a one-pixel third colour must be rejected ----
+        // 负向 1：单像素第三色必须被拒绝 ----
+        std::set<uint32_t> dstKeys;
+        for (const auto& sw : map) dstKeys.insert(colourKey(sw.second));
+        cv::Vec4b third(1, 2, 3, 255);
+        for (int t = 0; t < 256 && dstKeys.count(colourKey(third)); ++t)
+            third = cv::Vec4b((uchar)t, (uchar)(255 - t), 7, 255);
+
+        cv::Mat dirty = user.clone();
+        bool flipped = false;
+        for (int y = 0; y < dirty.rows && !flipped; ++y) {
+            cv::Vec4b* row = dirty.ptr<cv::Vec4b>(y);
+            for (int x = 0; x < dirty.cols; ++x) {
+                if (row[x][3] != 0) { row[x] = third; flipped = true; break; }
+            }
+        }
+        fb::PaletteMap dummy;
+        if (fb::extractPaletteMap(dirty, ref0, dummy, err)) {
+            std::cout << "  " << viewNames[v]
+                      << ": extractor ACCEPTED a one-pixel third colour   FAIL\n";
+            ++failures;
+        } else {
+            std::cout << "  " << viewNames[v] << ": third colour rejected   OK\n";
+        }
+
+        // ---- negative 2: the given user images must be rejected when they
+        // fail strict alignment (only if --front/--side/--back were passed).
+        // ---- 负向 2：给定的用户图若不满足严格对齐必须被拒绝（仅当传了
+        // --front/--side/--back）。
+        const std::string& negPath =
+            (v == 0 ? a.frontImg : (v == 1 ? a.sideImg : a.backImg));
+        if (!negPath.empty()) {
+            cv::Mat neg;
+            if (!fb::loadImageBgra(negPath, neg)) {
+                std::cout << "  " << viewNames[v] << ": cannot load " << negPath << "   FAIL\n";
+                ++failures;
+            } else if (fb::extractPaletteMap(neg, ref0, dummy, err)) {
+                std::cout << "  " << viewNames[v] << ": extractor ACCEPTED " << negPath
+                          << " (must be strict)   FAIL\n";
+                ++failures;
+            } else {
+                std::cout << "  " << viewNames[v] << ": " << negPath << " rejected   OK\n";
+            }
+        }
+    }
+
+    if (failures) {
+        std::cout << "\nRESULT: FAIL — " << failures << " check(s) failed.\n"
+                  << "结果：失败 —— " << failures << " 项检查未过。\n";
+        return 1;
+    }
+    std::cout << "\nRESULT: PASS — extraction round-trips exactly and stays strict.\n"
+              << "结果：通过 —— 提取精确往返且保持严格。\n";
+    return 0;
+}
+
+// The four-direction sheet gate. Everything is synthesised from the chips and
+// the palette map, so no fixture images are needed. Checks the layout, the
+// idle cycle-fill, left = mirrored right, the alpha-mask invariant (with the
+// row-order contract), and the palette coverage (map completeness).
+// 四方向大图闸门。一切由芯片与调色板映射合成，无需夹具图。检查布局、待机补帧、
+// left=right 镜像、alpha 掩码不变量（连同行序契约）、调色板覆盖（映射完整性）。
+int runFourdirGate(const CliArgs& a) {
+    fb::ChipSet cs;
+    std::string err;
+    if (!fb::loadChipSet(a.chips, cs, err)) { std::cerr << "FAIL: " << err << "\n"; return 1; }
+    fb::PaletteMap map;
+    if (!fb::loadPaletteMap(a.map, map, err)) { std::cerr << "FAIL: " << err << "\n"; return 1; }
+
+    // Synthetic user views: idle frame 0 with the map applied.
+    // 合成用户视图：对 idle f0 应用映射。
+    const char* viewNames[3] = {"front", "side", "back"};
+    cv::Mat user[3];
+    for (int v = 0; v < 3; ++v) {
+        const fb::MotionChips* idle = cs.find(std::string(viewNames[v]) + "_idle");
+        if (!idle) { std::cerr << "FAIL: chip set missing " << viewNames[v] << "_idle\n"; return 1; }
+        user[v] = idle->frames[0].clone();
+        fb::applyPaletteMap(user[v], map);
+    }
+
+    fb::FourDirResult res;
+    if (!fb::buildFourDirSheet(user[0], user[1], user[2], cs, res, err)) {
+        std::cerr << "FAIL: buildFourDirSheet: " << err << "\n";
+        return 1;
+    }
+
+    std::cout << "Chips: " << a.chips << "\nMap:   " << a.map
+              << " (" << map.size() << " entries)\n"
+              << "Sheet: " << res.sheet.cols << "x" << res.sheet.rows << "\n\n";
+
+    int failures = 0;
+    auto fail = [&](const std::string& what) {
+        std::cout << "  " << what << "   FAIL\n";
+        ++failures;
+    };
+
+    // (1) layout / 布局
+    if (res.sheet.type() != CV_8UC4 ||
+        res.sheet.cols != cs.cell.width * fb::SHEET_COLS ||
+        res.sheet.rows != cs.cell.height * fb::SHEET_ROWS)
+        fail("sheet is not " + std::to_string(cs.cell.width * fb::SHEET_COLS) + "x" +
+             std::to_string(cs.cell.height * fb::SHEET_ROWS) + " BGRA");
+    else
+        std::cout << "  layout 8x6   OK\n";
+
+    // (2) idle cycle-fill: f0 f1 f0 f1 f0 f1 / 待机补帧
+    bool fillOK = true;
+    for (int r = 0; r < fb::SHEET_ROWS && fillOK; r += 2) {   // idle rows 0,2,4,6
+        const std::vector<cv::Mat>& row = res.rows.rows[r];
+        if (row.size() != (size_t)fb::SHEET_COLS) { fillOK = false; break; }
+        for (int i = 0; i < fb::SHEET_COLS && fillOK; ++i) {
+            if (!imagesIdentical(row[i], row[i % 2])) fillOK = false;
+        }
+    }
+    if (!fillOK) fail("idle rows are not cycle-filled f0 f1 f0 f1 f0 f1");
+    else std::cout << "  idle cycle-fill   OK\n";
+
+    // (3) left = mirrored right / left = right 镜像
+    bool mirrorOK = true;
+    for (int i = 0; i < fb::SHEET_COLS && mirrorOK; ++i) {
+        if (!imagesIdentical(res.rows.rows[4][i], fb::mirrorFrame(res.rows.rows[6][i]))) mirrorOK = false;
+        if (!imagesIdentical(res.rows.rows[5][i], fb::mirrorFrame(res.rows.rows[7][i]))) mirrorOK = false;
+    }
+    if (!mirrorOK) fail("left rows are not the mirrored right rows");
+    else std::cout << "  left = mirror(right)   OK\n";
+
+    // (4) alpha masks preserved + row order contract. The expected chip for
+    //     each cell: rows 0/2/6 = idle[i%2] of front/back/side, rows 1/3/7 =
+    //     walk[i], rows 4/5 = mirrored side idle/walk. Mirroring flips x.
+    // (4) alpha 掩码不变 + 行序契约。每格期望芯片：行 0/2/6 = front/back/side 的
+    //     idle[i%2]，行 1/3/7 = walk[i]，行 4/5 = 镜像的 side idle/walk。镜像翻转 x。
+    const fb::MotionChips* chipsById[3][2] = {
+        {cs.find("front_idle"), cs.find("front_walk")},
+        {cs.find("side_idle"),  cs.find("side_walk")},
+        {cs.find("back_idle"),  cs.find("back_walk")},
+    };
+    // row -> (view index, anim index) for the verbatim rows; -1 = mirrored side.
+    // 行 ->（视图下标，动画下标）用于原样行；-1 = 镜像 side。
+    const int rowView[fb::SHEET_ROWS]   = {0, 0, 2, 2, -1, -1, 1, 1};
+    const int rowAnim[fb::SHEET_ROWS]   = {0, 1, 0, 1, 0, 1, 0, 1};
+    bool maskOK = true;
+    for (int r = 0; r < fb::SHEET_ROWS && maskOK; ++r) {
+        const int v = rowView[r] < 0 ? 1 : rowView[r];
+        const fb::MotionChips* m = chipsById[v][rowAnim[r]];
+        if (!m) { maskOK = false; break; }
+        for (int i = 0; i < fb::SHEET_COLS && maskOK; ++i) {
+            const cv::Mat& chip = m->frames[i % m->frameCount];
+            const cv::Mat expect = (rowView[r] < 0) ? fb::mirrorFrame(chip) : chip;
+            if (!alphaMaskEqual(res.rows.rows[r][i], expect)) maskOK = false;
+        }
+    }
+    if (!maskOK) fail("alpha mask changed (or row order is wrong)");
+    else std::cout << "  alpha masks + row order   OK\n";
+
+    // (5) coverage: every opaque colour is a map destination, and the map
+    //     covers every ref colour the view's chips use (idle AND walk) —
+    //     the standing guard for "extraction ran on idle f0 only".
+    // (5) 覆盖：非透明色全是映射目标色，且映射覆盖该视图芯片（idle 与 walk）
+    //     用到的全部参考色 —— "提取只做 idle f0"的常驻守门人。
+    for (int v = 0; v < 3; ++v) {
+        std::set<uint32_t> dst, allRef;
+        for (const auto& sw : res.maps[v]) dst.insert(colourKey(sw.second));
+        for (int anim = 0; anim < 2; ++anim) {
+            const fb::MotionChips* m = chipsById[v][anim];
+            if (!m) { ++failures; continue; }
+            for (const cv::Mat& f : m->frames) {
+                const std::set<uint32_t> keys = opaqueColourKeys(f);
+                allRef.insert(keys.begin(), keys.end());
+            }
+        }
+        bool covOK = ((int)res.maps[v].size() == (int)allRef.size());
+        // Output rows for this view: 0/1 front, 2/3 back, 4-7 side.
+        // 该视图的输出行：0/1 front，2/3 back，4-7 side。
+        const int r0 = (v == 0) ? 0 : (v == 1 ? 4 : 2);
+        for (int r = r0; r < r0 + 2 && covOK; ++r) {
+            for (const cv::Mat& f : res.rows.rows[r]) {
+                for (int y = 0; y < f.rows && covOK; ++y) {
+                    const cv::Vec4b* row = f.ptr<cv::Vec4b>(y);
+                    for (int x = 0; x < f.cols; ++x) {
+                        if (row[x][3] != 0 && !dst.count(colourKey(row[x]))) {
+                            covOK = false;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if (!covOK) {
+            std::cout << "  " << viewNames[v] << " palette coverage ("
+                      << res.maps[v].size() << " mapped vs " << allRef.size()
+                      << " ref colours)   FAIL\n";
+            ++failures;
+        } else {
+            std::cout << "  " << viewNames[v] << " palette coverage ("
+                      << res.maps[v].size() << " colours)   OK\n";
+        }
+    }
+
+    if (failures) {
+        std::cout << "\nRESULT: FAIL — " << failures << " check(s) failed.\n"
+                  << "结果：失败 —— " << failures << " 项检查未过。\n";
+        return 1;
+    }
+    std::cout << "\nRESULT: PASS — the 8x6 four-direction sheet is well-formed.\n"
+              << "结果：通过 —— 8x6 四方向大图形态正确。\n";
+    return 0;
+}
+
+// The app pipeline from the CLI: three template-aligned user views in, one
+// four-direction sheet PNG out. The GUI must export byte-identical output for
+// the same inputs (the golden invariant).
+// CLI 版 app 管线：三张模板对齐的用户视图进，一张四方向大图 PNG 出。同样的输入，
+// GUI 必须导出逐字节一致的结果（金不变量）。
+int runFourdir(const CliArgs& a) {
+    if (a.frontImg.empty() || a.sideImg.empty() || a.backImg.empty()) {
+        std::cerr << "--fourdir needs --front, --side and --back images.\n";
+        return 2;
+    }
+    fb::ChipSet cs;
+    std::string err;
+    if (!fb::loadChipSet(a.chips, cs, err)) { std::cerr << "FAIL: " << err << "\n"; return 1; }
+
+    cv::Mat views[3];
+    const std::string paths[3] = {a.frontImg, a.sideImg, a.backImg};
+    for (int v = 0; v < 3; ++v) {
+        if (!fb::loadImageBgra(paths[v], views[v])) {
+            std::cerr << "FAIL: cannot load " << paths[v] << "\n";
+            return 1;
+        }
+    }
+
+    fb::FourDirResult res;
+    if (!fb::buildFourDirSheet(views[0], views[1], views[2], cs, res, err)) {
+        std::cerr << "FAIL: " << err << "\n";
+        return 1;
+    }
+
+    const std::string outPath = a.out + "/fourdir_sheet.png";
+    if (!fb::saveImageBgra(outPath, res.sheet, err)) {
+        std::cerr << "FAIL: " << err << "\n";
+        return 1;
+    }
+
+    std::cout << "Chips:  " << a.chips << "\n"
+              << "Views:  " << a.frontImg << " / " << a.sideImg << " / " << a.backImg << "\n"
+              << "Colours: front " << res.maps[0].size() << ", side " << res.maps[1].size()
+              << ", back " << res.maps[2].size() << "\n"
+              << "Sheet:  " << res.sheet.cols << "x" << res.sheet.rows
+              << " (" << fb::SHEET_ROWS << " rows x " << fb::SHEET_COLS << " cols)\n"
+              << "Wrote:  " << outPath << "\n";
+    return 0;
+}
+
 int runCli(int argc, char** argv) {
     CliArgs a;
     std::string err;
@@ -547,6 +962,9 @@ int runCli(int argc, char** argv) {
     if (a.chipRecon)   return runChipRecon(a);
     if (a.chipReskin)  return runChipReskin(a);
     if (a.chipRender)  return runChipRender(a);
+    if (a.paletteGate) return runPaletteGate(a);
+    if (a.fourdirGate) return runFourdirGate(a);
+    if (a.fourdir)     return runFourdir(a);
     if (a.allPresets)  return runPresets(a, {"idle", "walk_side", "walk_front", "walk_up"});
     if (!a.preset.empty()) return runPresets(a, {a.preset});
 

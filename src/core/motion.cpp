@@ -11,8 +11,6 @@
 
 #include "core.h"
 
-#include <opencv2/imgcodecs.hpp>
-#include <opencv2/imgproc.hpp>
 #include <fstream>
 #include <sstream>
 
@@ -30,15 +28,6 @@ bool nextDataLine(std::istream& in, std::string& line) {
         return true;
     }
     return false;
-}
-
-// Read a chip PNG as BGRA (3-channel sources are promoted, matching rig.cpp).
-// 以 BGRA 读芯片 PNG（3 通道源提升为 BGRA，约定同 rig.cpp）。
-bool loadChipPng(const std::string& path, cv::Mat& out) {
-    out = cv::imread(path, cv::IMREAD_UNCHANGED);
-    if (out.empty()) return false;
-    if (out.channels() == 3) cv::cvtColor(out, out, cv::COLOR_BGR2BGRA);
-    return out.channels() == 4;
 }
 
 // Parse "1,2,3,4 5,6,7,8" into two BGRA vectors. Commas become spaces.
@@ -111,7 +100,7 @@ bool loadChipSet(const std::string& dir, ChipSet& out, std::string& err) {
                 const std::string p =
                     dir + "/chips/" + m.name + "_" + std::to_string(i) + ".png";
                 cv::Mat chip;
-                if (!loadChipPng(p, chip)) {
+                if (!loadImageBgra(p, chip)) {
                     err = "failed to load chip: " + p;
                     return false;
                 }

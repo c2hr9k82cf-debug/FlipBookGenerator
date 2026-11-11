@@ -32,6 +32,21 @@ constexpr int PART_LEG_LEFT  = 5;
 constexpr int PART_LEG_RIGHT = 6;
 
 // ---------------------------------------------------------------------------
+// Image I/O / 图像读写
+// ---------------------------------------------------------------------------
+// One place for the 3->4 channel rule: everything inside the core is BGRA
+// (CV_8UC4). Reads keep alpha (IMREAD_UNCHANGED).
+// 3→4 通道规则收拢一处：core 内部一律 BGRA（CV_8UC4）。读取保留 alpha（IMREAD_UNCHANGED）。
+
+// Load an image as BGRA. 3-channel sources are promoted; 2/1-channel fail.
+// 以 BGRA 读图。3 通道源提升为 4 通道；2/1 通道失败。
+bool loadImageBgra(const std::string& path, cv::Mat& out);
+
+// Save a BGRA image (PNG keeps alpha). Fills `err` on failure.
+// 保存 BGRA 图像（PNG 保留 alpha）。失败填 err。
+bool saveImageBgra(const std::string& path, const cv::Mat& img, std::string& err);
+
+// ---------------------------------------------------------------------------
 // Rig — per-view static data / 每视图的静态数据
 // ---------------------------------------------------------------------------
 
@@ -170,6 +185,31 @@ bool loadPaletteMap(const std::string& path, PaletteMap& out, std::string& err);
 // 用调色板映射渲染一本翻页书的各帧（恒等 = 照搬）。
 std::vector<cv::Mat> renderFromChips(const MotionChips& chips, const PaletteMap& map);
 
+// ---------------------------------------------------------------------------
+// Palette extraction — reskin from a user image / 配色提取 —— 从用户图换皮
+// ---------------------------------------------------------------------------
+
+// Diagnostics from extractPaletteMap. / extractPaletteMap 的诊断数据。
+struct ExtractStats {
+    int comparedPixels = 0;   // non-transparent ref pixels compared / 比对过的参考非透明像素
+    int mappedColours  = 0;   // distinct ref colours mapped / 映射出的参考色数
+    int maskDiffPixels = 0;   // alpha-mask mismatches / alpha 掩码不一致像素数
+};
+
+// Extract an exact BGRA palette map (refCell -> userImg) by pixel diff. Strict:
+// same size, identical alpha mask, and every ref colour must map to exactly ONE
+// user colour (the relation must be a function). On failure `err` names the
+// conflicting colours with counts and an example coordinate. Per the app plan,
+// extraction runs on idle frame 0 only — it covers every colour the view's
+// chips use; the fourdir gate watches for regressions.
+// 用逐像素差分提取精确 BGRA 映射（参考格 → 用户图）。严格：同尺寸、alpha 掩码
+// 一致、每个参考色恰好映射到一个用户色（关系必须是函数）。失败时 err 列出冲突色、
+// 计数与示例坐标。按 app 计划：提取只对 idle 第 0 帧做 —— 它覆盖该视图芯片用到的
+// 全部颜色；fourdir 闸门负责常驻盯着回归。
+bool extractPaletteMap(const cv::Mat& userImg, const cv::Mat& refCell,
+                       PaletteMap& out, std::string& err,
+                       ExtractStats* stats = nullptr);
+
 struct Keyframe {
     int  frame = 0;
     Pose pose;
@@ -290,5 +330,51 @@ bool exportAnimation(const std::vector<cv::Mat>& frames,
 // derived from the right-facing one. Exact and free for pixel art.
 // 水平镜像一帧 —— 由向右的方向推出向左。对像素图精确且免费。
 cv::Mat mirrorFrame(const cv::Mat& frame);
+
+// ---------------------------------------------------------------------------
+// Four-direction sheet — the .app's product / 四方向拼接大图 —— .app 的产品
+// ---------------------------------------------------------------------------
+// 8 rows x 6 cols of cell-sized frames. Row order (top -> bottom):
+//   down_idle, down_walk, up_idle, up_walk,
+//   left_idle, left_walk, right_idle, right_walk
+// down = front, up = back. Right/left come from the side chips (which face
+// RIGHT — eyeballed from side_idle_0.png): right rows use them verbatim, left
+// rows mirror them. Idle is 2 frames cycle-filled to 6 (f0 f1 f0 f1 f0 f1).
+// 8 行 x 6 列，每格为 cell 尺寸。行序（上→下）：
+//   down_idle, down_walk, up_idle, up_walk,
+//   left_idle, left_walk, right_idle, right_walk
+// down = front，up = back。左右出自侧视芯片（芯片本身朝右 —— 目检 side_idle_0.png
+// 确认）：right 行直接用，left 行水平镜像。待机 2 帧循环补到 6（f0 f1 f0 f1 f0 f1）。
+constexpr int SHEET_COLS = 6;
+constexpr int SHEET_ROWS = 8;
+
+// The 8 assembled rows, each exactly SHEET_COLS frames. / 组装好的 8 行，每行恰好 6 帧。
+struct FourDirRows {
+    std::array<std::vector<cv::Mat>, SHEET_ROWS> rows;
+};
+
+// Cycle-repeat (f0 f1 f0 f1 ...) or truncate `frames` to exactly `cols`.
+// 循环重复（f0 f1 f0 f1 …）或截断到恰好 cols 帧。
+std::vector<cv::Mat> repeatToLength(const std::vector<cv::Mat>& frames, int cols);
+
+// Tile the 8x6 rows into one sheet image (cell.width*6 x cell.height*8).
+// 把 8x6 各行平铺成一张大图（cell.width*6 x cell.height*8）。
+bool composeFourDirSheet(const FourDirRows& rows, cv::Size cell,
+                         cv::Mat& out, std::string& err);
+
+// The full app pipeline: extract palettes from three template-aligned user
+// views, reskin the chips, assemble the rows, compose the sheet. Enforces the
+// coverage invariant — every opaque output pixel must be a map destination,
+// which catches a walk-frame colour that idle frame 0 never showed.
+// app 完整管线：从三张模板对齐的用户视图提取配色、给芯片换皮、组装各行、拼成
+// 大图。执行覆盖不变量 —— 每个非透明输出像素必须是映射目标色，抓"行走帧有
+// idle 第 0 帧没出现过的颜色"这类回归。
+struct FourDirResult {
+    cv::Mat sheet;                     // the big PNG / 最终大图
+    FourDirRows rows;                  // assembled rows (for tests/preview) / 组装的行
+    std::array<PaletteMap, 3> maps;    // extracted maps: front, side, back / 提取的映射
+};
+bool buildFourDirSheet(const cv::Mat& front, const cv::Mat& side, const cv::Mat& back,
+                       const ChipSet& chips, FourDirResult& out, std::string& err);
 
 }  // namespace fb

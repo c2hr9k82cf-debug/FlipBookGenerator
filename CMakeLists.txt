@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(FlipBookGenerator VERSION 0.8.0 LANGUAGES CXX)
+project(FlipBookGenerator VERSION 0.8.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -35,6 +35,9 @@ add_library(flipbook_core STATIC
     src/core/export.cpp
     src/core/parts.cpp
     src/core/motion.cpp
+    src/core/image_io.cpp
+    src/core/palette.cpp
+    src/core/sheet.cpp
 )
 target_link_libraries(flipbook_core ${OpenCV_LIBS})
 
@@ -117,6 +120,30 @@ add_test(
 add_test(
     NAME chip_reskin
     COMMAND flipbook --chip-reskin --chips
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates/motion_chips
+            --map ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates/motion_chips/palette_map.txt
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+# Four-direction sheet gates (the .app pipeline). Palette extraction round-trips
+# a synthesised view and stays strict (the alt character is the negative
+# fixture); the sheet gate checks layout / idle fill / mirroring / masks /
+# coverage. Template-level, run once.
+# 四方向大图闸门（app 管线）。配色提取对合成视图精确往返并保持严格（换皮角色图
+# 是负向夹具）；大图闸门检查布局/补帧/镜像/掩码/覆盖。模板级，跑一次。
+add_test(
+    NAME palette_extract
+    COMMAND flipbook --palette-gate --chips
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates/motion_chips
+            --map ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates/motion_chips/palette_map.txt
+            --front ${CMAKE_CURRENT_SOURCE_DIR}/assets/character_alt.png
+            --side ${CMAKE_CURRENT_SOURCE_DIR}/assets/character_alt_side.png
+            --back ${CMAKE_CURRENT_SOURCE_DIR}/assets/character_alt_back.png
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+add_test(
+    NAME fourdir_sheet
+    COMMAND flipbook --fourdir-gate --chips
             ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates/motion_chips
             --map ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates/motion_chips/palette_map.txt
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
