@@ -1,7 +1,6 @@
 {
   "name": "ref_boots",
   "slot": "boots",
-  "zOrder": 10,
   "back": "file",
   "silhouette": "template",
   "roleColors": [],

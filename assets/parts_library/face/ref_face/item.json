@@ -1,7 +1,6 @@
 {
   "name": "ref_face",
   "slot": "face",
-  "zOrder": 30,
   "back": "file",
   "silhouette": "template",
   "roleColors": [],

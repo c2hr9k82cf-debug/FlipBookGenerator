@@ -1,7 +1,6 @@
 {
   "name": "ref_body",
   "slot": "body",
-  "zOrder": 5,
   "back": "file",
   "silhouette": "template",
   "roleColors": [],

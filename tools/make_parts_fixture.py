@@ -33,8 +33,6 @@ ASSETS = ROOT / "assets"
 OUT_DIR = ROOT / "assets" / "parts_library"
 
 SLOTS = ("hair", "face", "top", "pants", "boots", "body")
-Z_ORDER = {"hair": 40, "face": 30, "top": 20, "pants": 10, "boots": 10,
-           "body": 5}
 VIEWS = (("front", "character_32.png"),
          ("side", "character_32_side.png"),
          ("back", "character_32_back.png"))
@@ -202,13 +200,17 @@ def main():
         print(f"SELFCHECK {view_name}: OK — six slots tile the silhouette")
 
     # item.json per item: back:"file" (all three views come from the reference).
+    # v0.12.0: NO zOrder field — layering is the defaultLayerZ table
+    # (pants/boots 10 -> top 20 -> face 30 -> bare skin 45 -> hair 50,
+    # back-layer pieces 5). An explicit zOrder overrides the table.
     # 每件 item.json：back:"file"（三视图都来自参考角色）。
+    # v0.12.0：不写 zOrder —— 层序走 defaultLayerZ 表（裤/靴 10 -> 上衣 20 ->
+    # 脸 30 -> 裸肤 45 -> 头发 50，垫底片恒 5）。显式 zOrder 才覆盖表。
     for slot in SLOTS:
         item_dir = OUT_DIR / slot / f"ref_{slot}"
         meta = {
             "name": f"ref_{slot}",
             "slot": slot,
-            "zOrder": Z_ORDER[slot],
             "back": "file",
             "silhouette": "template",
             "roleColors": [],

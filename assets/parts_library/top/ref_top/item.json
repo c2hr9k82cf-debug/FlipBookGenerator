@@ -1,7 +1,6 @@
 {
   "name": "ref_top",
   "slot": "top",
-  "zOrder": 20,
   "back": "file",
   "silhouette": "template",
   "roleColors": [],

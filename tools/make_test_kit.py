@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# make_test_kit.py — V0.11.3: generate the fresh debug kit (整改测试素材).
-# 生成全新调试素材包（V0.11.3 整改测试素材）。
+# make_test_kit.py — V0.12.0: generate the fresh debug kit (整改测试素材).
+# 生成全新调试素材包（V0.12.0 整改测试素材）。
 #
 # Why / 为什么:
 #   The user asked for brand-new material that follows the chibi_standard
@@ -20,9 +20,13 @@
 #   * parts: an importable new hairstyle and a new top, per the colour-slot
 #     rules (collar painted into the collar band; no gold/hair_highlight
 #     same-RGB trap — those two roles share RGB and only region
-#     disambiguates them).
+#     disambiguates them). v0.12.0: the top hugs the top region box (plan
+#     D1) and the hairstyle ships TWO pieces (front fringe/crown + back-layer
+#     rear mass, plan D2) — asserted inside their boxes at generation time.
 #     部件：可导入的新发型与新上衣，符合颜色-槽位规则（领口画进领口带；
 #     规避 gold/hair_highlight 同 RGB 陷阱 —— 两角色同色、仅靠区域消歧）。
+#     v0.12.0：上衣收进上衣轮廓框（计划 D1）、发型出双片（前发刘海/顶发 +
+#     垫底后发团，计划 D2）—— 生成时即断言坐在框内。
 #
 # The mixed variant is ALSO written to tests/fixtures/test_kit/ so the
 # tolerant palette assertions can consume it headlessly.
@@ -47,6 +51,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES = ROOT / "assets" / "templates"
+REGIONS_JSON = TEMPLATES / "chibi_regions.json"
 DEFAULT_OUT = Path.home() / "Desktop" / "FlipBook整改测试素材"
 FIXTURE_OUT = ROOT / "tests" / "fixtures" / "test_kit"
 
@@ -227,20 +232,47 @@ def build_mixed(front):
     return out, n
 
 
-def part_frame(view, char_rgb, std_rows, keep_chars):
+def part_frame(view, char_rgb, std_rows, keep_chars, piece="main"):
     """A library part sprite: the template-colour pixels whose art character
     is in keep_chars, on a transparent 32x32 canvas (template coords).
+    piece (v0.12.0 plan D2): "main" = the FRONT hair piece (fringe + crown —
+    the layer that covers the face), "back" = the BACK-LAYER piece (rear mass
+    + hanging side hair — the layer that beds under face and clothes).
     库部件精灵：像素图中字符属于 keep_chars 的模板色像素，画在透明 32×32
-    画布上（模板坐标）。"""
+    画布上（模板坐标）。piece（v0.12.0 计划 D2）："main" = 前发片（刘海 + 顶发
+    —— 盖脸层），"back" = 垫底片（后脑发团 + 侧垂发 —— 垫在脸和衣服下面）。"""
     art = list(std_rows[view])
     art[:11] = BOB_HEAD[view]
     frame = blank_frame(32, 32)
     for row, line in enumerate(art):
+        # HEAD rows only (y2-y12). The old version also collected the '@'
+        # outline of body/leg rows into the hairstyle — invisible while the
+        # pieces shared the outline colour, but it put leg pixels into the
+        # hair region box (caught by assert_in_box in v0.12.0).
+        # 只收【头部行】（y2-y12）。旧版把身体/腿行的 '@' 描边也收进了发型件
+        # —— 描边同色时看不出来，但腿像素坐进了头发轮廓框（v0.12.0 被
+        # assert_in_box 抓住）。
+        if row >= 11:
+            break
         for col, ch in enumerate(line):
             if ch not in keep_chars:
                 continue
             rgb = char_rgb[ch]
             if rgb is None:
+                continue
+            # Piece ownership / 片归属:
+            #   front: y8+ is the hanging side hair (back piece); y2-y7 crown
+            #     + fringe is the front piece.
+            #   side: y8+ splits at the midline — col<=6 is the rear mass
+            #     (back piece), col>=7 the fringe/sideburn side (front piece).
+            #   正面：y8 起是侧垂发（垫底片）；y2-y7 顶发 + 刘海是前发片。
+            #   侧面：y8 起按中线分 —— col<=6 后脑（垫底片），col>=7 刘海侧
+            #   （前发片）。
+            if view == "front":
+                to_back = row >= 6
+            else:
+                to_back = row >= 6 and col <= 6
+            if (piece == "back") != to_back:
                 continue
             frame[row + 2][col + 9] = (rgb[0], rgb[1], rgb[2], 255)
     return frame
@@ -251,32 +283,39 @@ def top_part_frame(view):
     The collar reaches UP into the collar band (y12, bottom of the head
     region) so the neck is never bare — the colour-slot rule from
     docs/PARTS_FORMAT.md. Never uses gold/hair_highlight (same-RGB trap).
+    v0.12.0: the outline now hugs the TOP REGION BOX (plan D1) — the old
+    version drew full-width shoulders into the arm columns and broke the
+    drawing contract ("the test top swallows the arms").
     新上衣（高领毛衣），手工绘制，模板色。领口上延进领口带（y12，头部区下沿），
     脖子永不裸露 —— docs/PARTS_FORMAT.md 的颜色-槽位规则。绝不使用
-    gold/hair_highlight（同 RGB 陷阱）。"""
+    gold/hair_highlight（同 RGB 陷阱）。v0.12.0：轮廓收进【上衣轮廓框】（计划
+    D1）—— 旧版画满宽肩、侵入臂列、违反绘制契约（"测试上衣吞胳膊"）。"""
     # char -> template RGB, asserted below / 字符 -> 模板 RGB，下方断言
     art = {
         "front": [
-            "..TT@....@TT..",   # y12 collar band / 领口带
-            ".TTTTTTTTTTTT.",   # y13 neck roll / 领圈
-            "@TTTTTTTTTTTT@",   # y14 shoulders + sleeves / 肩 + 袖
-            "@TTwwwwwwwwTT@",   # y15 chest stripe / 胸前白条
-            "@TTwwwwwwwwTT@",   # y16
-            "@TTTTTTTTTTTT@",   # y17
-            "@mmmmmmmmmmmm@",   # y18 hem band / 下摆带
-            ".@TTTTTTTTTT@.",   # y19
-            "..@@@@@@@@@@..",   # y20 hem edge / 下摆缘
+            "..T.TT..TTT...",   # y12 collar band / 领口带
+            ".TT.TTTTTTT...",   # y13 neck roll / 领圈
+            ".@TTTTTTTT@...",   # y14 shoulders / 肩
+            ".@TTwwwwwwT@..",   # y15 chest stripe / 胸前白条
+            "...@TwwwwwT@..",   # y16
+            "...@TTTTTT@...",   # y17
+            "...@mmmmmm@...",   # y18 hem band / 下摆带
+            "...@TTTTTT@...",   # y19
+            "....@@@@@@@...",   # y20 hem edge / 下摆缘
         ],
+        # Same shape as front: legal under the shared region box (the box is
+        # the union across all animation frames and directions).
+        # 与正面同形：共享轮廓框内合法（框是全部动画帧、全部方向的并集）。
         "side": [
-            "....@TT@......",   # y12 collar band / 领口带
-            ".TTTTTTTTTTTT.",   # y13
-            "@TTTTTTTTTTTT@",   # y14
-            "@TTwwwwwwwwTT@",   # y15
-            "@TTwwwwwwwwTT@",   # y16
-            "@TTTTTTTTTTTT@",   # y17
-            "@mmmmmmmmmmmm@",   # y18
-            ".@TTTTTTTTTT@.",   # y19
-            "..@@@@@@@@@@..",   # y20
+            "..T.TT..TTT...",   # y12 collar band / 领口带
+            ".TT.TTTTTTT...",   # y13
+            ".@TTTTTTTT@...",   # y14
+            ".@TTwwwwwwT@..",   # y15
+            "...@TwwwwwT@..",   # y16
+            "...@TTTTTT@...",   # y17
+            "...@mmmmmm@...",   # y18
+            "...@TTTTTT@...",   # y19
+            "....@@@@@@@...",   # y20
         ],
     }
     chars = art[view]
@@ -290,20 +329,39 @@ def top_part_frame(view):
     return frame
 
 
+def load_region_masks():
+    """slot -> 32 row strings, '#' = inside the drawing box (v0.12.0 plan D1).
+    槽 -> 32 行字符串，'#' = 绘制框内（v0.12.0 计划 D1）。"""
+    with open(REGIONS_JSON, encoding="utf-8") as f:
+        data = json.load(f)
+    return {s: v["mask"] for s, v in data["slots"].items()}
+
+
+def assert_in_box(name, frame, mask):
+    """Fail hard if any opaque pixel sits outside the slot's region box —
+    the drawing contract ("a top may never swallow the arms").
+    有不透明像素坐在槽轮廓框外就硬失败 —— 绘制契约（"上衣绝不吞胳膊"）。"""
+    bad = [(x, y) for y in range(32) for x in range(32)
+           if frame[y][x][3] and mask[y][x] != "#"]
+    assert not bad, f"{name}: {len(bad)} px outside the region box, first {bad[:5]}"
+
+
 # char -> template RGB for the hand-authored top rows (built in main()).
 # 手工上衣行的字符 -> 模板 RGB（main() 里构建）。
 RECOLOUR_NAME_INV = {}
 
 
-def write_item_json(path, name, slot, zorder, back):
+def write_item_json(path, name, slot, back):
+    # v0.12.0: no zOrder field — layering is the defaultLayerZ table
+    # (pants/boots 10 -> top 20 -> face 30 -> bare skin 45 -> hair 50,
+    # back-layer pieces 5). / v0.12.0：不写 zOrder —— 层序走 defaultLayerZ 表。
     meta = {
         "name": name,
         "slot": slot,
-        "zOrder": zorder,
         "back": back,
         "silhouette": "template",
         "roleColors": [],
-        "note": "V0.11.3 debug kit part / 整改测试素材部件",
+        "note": "V0.12.0 debug kit part / 整改测试素材部件",
     }
     with open(path, "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
@@ -311,7 +369,7 @@ def write_item_json(path, name, slot, zorder, back):
 
 
 def write_readme(path, mixed_count):
-    text = f"""FlipBook整改测试素材（V0.11.3）—— 每张测什么
+    text = f"""FlipBook整改测试素材（V0.12.0）—— 每张测什么
 ==================================================
 
 一、正向：新角色三视图（拖进「动画导出」tab，三张齐了自动出四方向大图）
@@ -335,11 +393,17 @@ def write_readme(path, mixed_count):
 
 三、部件（拖进「部件编辑器」tab 或「捏人换装」tab —— 会送进编辑器）
 --------------------------------------------------
-部件_新发型/hair_bob_blue/    新发型"蓝发波波头"（front+side，back 自动推断）
-部件_新上衣/scarf_jacket/     新上衣"高领条纹衫"（领口画进领口带 y12，不露脖子）
+部件_新发型/hair_bob_blue/    新发型"蓝发波波头"（前发片 front+side、
+                              垫底后发片 front_b+side_b，back 自动推断）
+部件_新上衣/scarf_jacket/     新上衣"高领条纹衫"（轮廓收在上衣轮廓框内；
+                              领口画进领口带 y12，不露脖子）
     导入后微调、点「保存到库」，切「捏人换装」立刻能看到缩略图。
-    测点：保存必弹结果框 + 路径进剪贴板；缩略图网格可见；zOrder 按槽缺省
-    （发型在最上层，不被脸/衣服盖住 —— 旧版自制部件垫底的 bug 已修）。
+    测点：保存必弹结果框 + 路径进剪贴板；缩略图网格可见；层序按槽位缺省表
+    （头发 z50 盖顶、脸 z30、上衣 z20、裸肤 z45 护臂、后发垫底片 z5 垫最底）。
+    硬规范：部件像素只许画在本槽的轮廓框内（编辑器画布框外打灰），保存时
+    框外有像素直接拒绝并报数 —— 这就是"上衣不许吞胳膊"的机制。
+    发型双片：前发片（刘海+顶发）盖住脸，后发片（后脑+侧垂发）垫在脸和
+    衣服下面 —— 脸夹在两层中间，正是分层合成的要点。
     注：部件像素是模板角色色（role 约束），想要别的颜色用捏人 tab 的
     全局换色改。
 
@@ -410,22 +474,36 @@ def main():
     blit(big, std_front, 24, 8)       # centred-ish / 大致居中
     write_png(out / "容错_非32x32_80x48.png", big)
 
-    # ---- 3. parts: hairstyle + top (template colours, role constraint) ----
-    # ---- 3. 部件：发型 + 上衣（模板色，role 约束）----
+    # ---- 3. parts: hairstyle + top (template colours, role constraint,
+    #          inside their region boxes; hair in TWO pieces, v0.12.0) ----
+    # ---- 3. 部件：发型 + 上衣（模板色、role 约束、坐在轮廓框内；发型双片，
+    #          v0.12.0）----
+    masks = load_region_masks()
     hair_dir = out / "部件_新发型" / "hair_bob_blue"
     for view in ("front", "side"):
         # The hairstyle owns hair chars + the outline contour (no face pixels,
         # and deliberately NO 'y' — the gold/hair_highlight same-RGB trap).
+        # Two pieces (plan D2): front piece = fringe + crown, back piece =
+        # rear mass + hanging side hair. A single piece would work too (the
+        # loader stamps it twice) — the split is what lets the face sit
+        # BETWEEN the two layers.
         # 发型件收头发字符 + 描边轮廓（不含脸像素，且刻意不用 'y' ——
-        # gold/hair_highlight 同 RGB 陷阱）。
-        fr = part_frame(view, char_rgb, std_rows, keep_chars=set("@hH"))
-        write_png(hair_dir / f"{view}.png", fr)
-    write_item_json(hair_dir / "item.json", "hair_bob_blue", "hair", 40, "auto")
+        # gold/hair_highlight 同 RGB 陷阱）。两片（计划 D2）：前发片 = 刘海 +
+        # 顶发，垫底片 = 后脑发团 + 侧垂发。单片也能用（加载器贴两次）——
+        # 拆开才让脸夹在两层【中间】。
+        for piece, suffix in (("main", ""), ("back", "_b")):
+            fr = part_frame(view, char_rgb, std_rows, keep_chars=set("@hH"),
+                            piece=piece)
+            assert_in_box(f"hair_bob_blue/{view}{suffix}", fr, masks["hair"])
+            write_png(hair_dir / f"{view}{suffix}.png", fr)
+    write_item_json(hair_dir / "item.json", "hair_bob_blue", "hair", "auto")
 
     top_dir = out / "部件_新上衣" / "scarf_jacket"
     for view in ("front", "side"):
-        write_png(top_dir / f"{view}.png", top_part_frame(view))
-    write_item_json(top_dir / "item.json", "scarf_jacket", "top", 20, "auto")
+        fr = top_part_frame(view)
+        assert_in_box(f"scarf_jacket/{view}", fr, masks["top"])
+        write_png(top_dir / f"{view}.png", fr)
+    write_item_json(top_dir / "item.json", "scarf_jacket", "top", "auto")
 
     # ---- 4. readme ----
     # ---- 4. 说明 ----

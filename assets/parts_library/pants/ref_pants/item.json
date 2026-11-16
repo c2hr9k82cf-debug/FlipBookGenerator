@@ -1,7 +1,6 @@
 {
   "name": "ref_pants",
   "slot": "pants",
-  "zOrder": 10,
   "back": "file",
   "silhouette": "template",
   "roleColors": [],

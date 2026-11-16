@@ -10,9 +10,12 @@
 parts_library/
   <slot>/                      # 六槽之一 / one of the six slots
     <item_name>/               # 物品名（目录名即默认名）/ item name (dir = default name)
-      front.png                # 必备 / required
-      side.png                 # 必备 / required
+      front.png                # 主片必备 / main piece, required
+      side.png                 # 主片必备 / main piece, required
       back.png                 # back:"file" 时必备 / required iff back:"file"
+      front_b.png              # 可选垫底片 / optional back-layer piece
+      side_b.png               # 可选垫底片 / optional back-layer piece
+      back_b.png               # 可选；需与 back.png 同在 / optional; needs back.png
       item.json                # 必备 / required
       poses/                   # v2 预留，v1 不读不写 / reserved for v2, v1 untouched
 ```
@@ -76,6 +79,71 @@ region — hair-shine on the head belt, gold trim elsewhere.
   silhouette at compose time). Ambiguity is refused: the loader rejects items
   that have both.
 
+## 垫底片（两片件）/ Back-layer pieces (v0.12.0)
+
+每件最多**两片**：主片（`X.png`，盖顶层）与垫底片（`X_b.png`，b = back-layer）。
+没有 `_b` 文件 = 单片件：主片在合成时贴两次，与旧观感逐像素一致。
+
+- **发型是两片件的主用户**：前发片（刘海 + 顶发，`front.png`/`side.png`，
+  盖住脸）+ 后发片（后脑发团 + 侧垂发，`front_b.png`/`side_b.png`，垫在
+  脸和衣服下面）。脸夹在两层中间 —— 这就是分层合成的要点。
+- **层序**（`defaultLayerZ`）：垫底片恒 **z=5**（垫最底）；主片按槽表
+  pants/boots 10 → top 20 → face 30 → 裸肤 body 45（防御层）→ hair 50。
+  `item.json` 的显式 `zOrder` 只覆盖**主片**。
+- **背面交叉镜像**（`back:"auto"`）：前发片水平镜像 → 背面垫底，后发片
+  水平镜像 → 背面盖顶（"素材正/背面各经一次水平翻转"规则）。非 hair 槽的
+  背面仍走逐物品推断（inferBackView）。
+- `back_b.png` 需要 `back.png` 同在（auto 模式下背面两片归推断所有，
+  `back_b.png` 会被拒）。
+
+/ Every item has at most **two pieces**: the main piece (`X.png`, top layer)
+and the back-layer piece (`X_b.png`). No `_b` files = single-piece item: the
+main sprite stamps twice, pixel-identical to the old look.
+- **Hair is the primary two-piece user**: front piece (fringe + crown,
+  covers the face) + back piece (rear mass + hanging side hair, beds under
+  face and clothes). The face sits BETWEEN the layers.
+- **Layering** (`defaultLayerZ`): the back-layer piece always **z=5**
+  (bottom); the main piece follows the slot table (pants/boots 10 → top 20 →
+  face 30 → bare skin 45, the defence layer → hair 50). An explicit
+  `zOrder` overrides the **main piece** only.
+- **Back cross-mirror** (`back:"auto"`): the front piece mirrors into the
+  back bedding, the back piece mirrors onto the back top layer (the "each
+  piece flips exactly once" rule). Non-hair slots keep per-item inference.
+- `back_b.png` needs `back.png` alongside (auto mode owns the back pieces;
+  `back_b.png` is refused).
+
+## 轮廓框规范 / Region-box contract (v0.12.0)
+
+每槽有一个**轮廓框**：该槽在**全部动作芯片帧**中出现过的格子并集
+（`assets/templates/chibi_regions.json`，`tools/extract_regions.py` 提取）。
+
+**绘制契约：部件只许画在本槽轮廓框内。** 这就是"上衣不许吞胳膊"的机制 ——
+臂格只属于臂的框，上衣画过去会被拒绝。框**允许重叠**（袖格同属 top 框与
+body 框）；重叠格的逐帧归属由动画端的区域替换决定（阶段二）。
+
+- 编辑器画布把框外打灰；保存时框外有不透明像素 → **拒绝保存**并报出越界
+  像素数（`saveEditorItem` + `outOfBoxPixels`）。
+- 生成工具在生成时自证（`make_test_kit.py` 的 `assert_in_box`）。
+- 闸门：`--region-gate`（数据自洽 + 参考件在框内）、`--editor-box-gate`
+  （保存侧拒绝行为）。
+
+/ Each slot has a **region box**: the union of cells the slot occupies across
+**all motion chip frames** (`assets/templates/chibi_regions.json`, extracted
+by `tools/extract_regions.py`).
+
+**Drawing contract: a part may only paint inside its slot's box.** This is
+what keeps a shirt from swallowing the arms — arm cells belong to the arm
+box only. Boxes **may overlap** (a sleeve cell is in both the top and body
+boxes); per-frame ownership of overlapping cells is the animation-side
+region replacement's job (phase 2).
+
+- The editor greys the area outside the box; saving with out-of-box opaque
+  pixels is **refused** with the count (`saveEditorItem` + `outOfBoxPixels`).
+- Generators self-check at generation time (`assert_in_box` in
+  `make_test_kit.py`).
+- Gates: `--region-gate` (data self-consistency + reference items in-box),
+  `--editor-box-gate` (save-side refusal behaviour).
+
 ## item.json
 
 ```json
@@ -97,7 +165,7 @@ region — hair-shine on the head belt, gold trim elsewhere.
 |---|---|---|
 | `name` | 否（缺省=目录名）/ no (default = dir name) | 物品名 / item name |
 | `slot` | 否（但必须与父目录一致）/ no (must match folder) | 槽位；与目录不符即报错 / slot; mismatch with the folder is an error |
-| `zOrder` | 否（缺省按槽查表：hair 40 / face 30 / top 20 / pants 10 / boots 10 / body 5）/ no (slot default: hair 40 / face 30 / top 20 / pants 10 / boots 10 / body 5) | 合成序，大在上；省略即用缺省表（v0.11.2 修复 A，不再缺省 0 垫底）/ compositing order, higher on top; omitted = the slot table (v0.11.2 fix A — no longer defaults to 0 at the bottom) |
+| `zOrder` | 否（缺省按槽查表：pants/boots 10 / top 20 / face 30 / body 45 / hair 50；垫底片恒 5）/ no (slot table: pants/boots 10 / top 20 / face 30 / body 45 / hair 50; back-layer pieces 5) | 主片合成序，大在上；省略即用缺省表（v0.11.2 修复 A，v0.12.0 起 body=45、hair=50）/ main-piece compositing order, higher on top; omitted = the slot table (v0.11.2 fix A; v0.12.0 sets body=45, hair=50) |
 | `anchors` | 否 / no | 逐视图锚点 `[x,y]`；缺省用模板默认 / per-view anchor `[x,y]`; template default otherwise |
 | `roleColors` | 否 / no | 本物品的角色换色，见下 / role recolours for this item, see below |
 | `back` | 否（缺省 `"auto"`）/ no (default `"auto"`) | `"auto"` = 剪影推断；`"file"` = 用 back.png / `"auto"` = silhouette inference; `"file"` = use back.png |
@@ -157,13 +225,14 @@ directory. v1 is plain folder copy.
 - 缺 `front.png` / `side.png` / `item.json`
 - `item.json` 语法错误、类型错误
 - `slot` 与目录不符
-- 图片尺寸非 32×32 或非 BGRA
-- `back:"file"` 缺 `back.png`；`back:"auto"` 却有 `back.png`
+- 图片尺寸非 32×32 或非 BGRA（含 `_b` 片）/ wrong size or channels (back-layer pieces included)
+- `back:"file"` 缺 `back.png`；`back:"auto"` 却有 `back.png` 或 `back_b.png`
 - `roleColors` 缺 `role`/`dst` 或数组形状错
 - `silhouette` 不是 `"template"`
 
 / Any invalid item ⇒ **the whole load fails**, naming the folder and reason.
 Known error paths (all covered by `--parts-library-gate`): missing
 `front.png`/`side.png`/`item.json`; malformed `item.json`; slot/folder
-mismatch; wrong size or channels; `back:"file"` without `back.png`;
-`back:"auto"` with `back.png`; bad `roleColors`; unknown `silhouette`.
+mismatch; wrong size or channels (back-layer pieces included);
+`back:"file"` without `back.png`; `back:"auto"` with `back.png` or
+`back_b.png`; bad `roleColors`; unknown `silhouette`.

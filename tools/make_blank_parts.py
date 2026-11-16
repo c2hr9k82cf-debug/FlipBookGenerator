@@ -49,7 +49,6 @@ OUT_DIR = ROOT / "assets/parts/_blank"
 
 VIEWS = [("front", "character_32.png"), ("side", "character_32_side.png")]
 SLOTS = ["hair", "face", "top", "pants", "boots", "body"]
-Z_ORDER = {"hair": 40, "face": 30, "top": 20, "pants": 10, "boots": 10, "body": 5}
 WHITE = (255, 255, 255, 255)
 
 
@@ -206,7 +205,6 @@ def main():
             out_name = f"{slot}_{view_name}.png"
             out.save(OUT_DIR / out_name)
             entry = manifest["slots"].setdefault(slot, {
-                "zOrder": Z_ORDER[slot],
                 "placeholder": "white",
             })
             entry[view_name] = out_name
