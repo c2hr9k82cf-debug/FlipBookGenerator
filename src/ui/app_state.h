@@ -12,6 +12,7 @@
 #include "core/core.h"
 #include "core/part_editor.h"
 #include "core/parts_library.h"
+#include "core/regions.h"
 #include "core/template_spec.h"
 
 #include <string>
@@ -105,6 +106,13 @@ public:
     fb::TemplateSpec templateSpec;
     bool templateReady = false;
     std::string templateError;
+    // Region-box data (v0.12.0): the per-slot drawing contract shown greyed
+    // on the canvas and enforced on save. Loaded once beside the template.
+    // 轮廓框数据（v0.12.0）：逐槽绘制契约 —— 画布上打灰显示、保存时强制校验。
+    // 与模板同区，加载一次。
+    fb::RegionBoxes regions;
+    bool regionsReady = false;
+    std::string regionsError;
 
     // Import staging: the raw image + integer alignment params, so the user
     // can fine-tune after the auto search (P1 engine, same as the view slots).
@@ -115,6 +123,9 @@ public:
 
     // Locate + load the character template once. / 定位并加载一次角色模板。
     bool ensureTemplate();
+    // Locate + load the region boxes once (missing data = no box enforcement,
+    // never a hard error). / 定位并加载一次轮廓框（缺数据 = 不做框校验，绝不硬错）。
+    bool ensureRegions();
     // Import a PNG into the editor's active view (auto-aligned to the
     // template silhouette). / 导入 PNG 到编辑器当前视图（对模板剪影自动对齐）。
     bool editorImport(const std::string& path);

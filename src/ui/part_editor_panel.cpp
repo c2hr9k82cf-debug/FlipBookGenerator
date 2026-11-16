@@ -89,7 +89,10 @@ void drawPartEditor(AppState& st, PreviewTextures& tex) {
     // 一次性：开一件新部件，画布永远不是死胡同。
     if (!inited) {
         inited = true;
-        if (!ed.viewReady(0) && !ed.viewReady(1) && !ed.viewReady(2)) {
+        bool anyView = false;
+        for (int p = 0; p < 2; ++p)
+            for (int v = 0; v < 3; ++v) anyView = anyView || ed.viewReady(p, v);
+        if (!anyView) {
             ed.blank(cv::Size(32, 32));
             std::snprintf(nameBuf, sizeof(nameBuf), "%s", ed.itemName.c_str());
         }
@@ -151,7 +154,12 @@ void drawPartEditor(AppState& st, PreviewTextures& tex) {
         // "fill and it becomes an item"; a plain empty canvas only when the
         // template is missing. / v0.11.2 修复 F：按槽载入形状空白模板（白填充
         // + 描边）——"涂色即成件"；模板缺失才退回纯空白。
+        // blank() resets the piece tab to MAIN — restore it so "new" fills the
+        // piece the user is looking at. / blank() 会把片 tab 复位到主片 ——
+        // 恢复它，让"新建"填的正是用户正在看的片。
+        const int keepPiece = ed.piece;
         ed.blank(templOk ? st.templateSpec.size : cv::Size(32, 32));
+        ed.setPiece(keepPiece);
         const char* viewNames[2] = {"front", "side"};
         int loaded = 0;
         for (int v = 0; v < 2; ++v) {
@@ -161,7 +169,7 @@ void drawPartEditor(AppState& st, PreviewTextures& tex) {
             if (img.empty() || img.size() != ed.canvas ||
                 img.type() != CV_8UC4)
                 continue;
-            ed.pixels[v] = img.clone();
+            ed.pixels[keepPiece][v] = img.clone();
             ++loaded;
         }
         st.status = loaded
@@ -201,8 +209,31 @@ void drawPartEditor(AppState& st, PreviewTextures& tex) {
         if (sel) ImGui::PopStyleColor();
         if (ed.viewReady(v)) {
             ImGui::SameLine();
-            ImGui::TextDisabled(ed.touched[v] ? "*" : "✓");
+            ImGui::TextDisabled(ed.touched[ed.piece][v] ? "*" : "✓");
         }
+    }
+
+    // ---- piece tabs (hair only, v0.12.0 plan D2) ----
+    // 片 tab（仅发型槽，v0.12.0 计划 D2）：前发片 X.png 盖顶，后发片 X_b.png
+    // 垫底。同一件的两片独立绘制、独立保存。
+    if (ed.slot == "hair") {
+        ImGui::Spacing();
+        ImGui::TextUnformatted("发片");
+        const char* kPieceLabels[2] = {"前发片（盖顶）", "后发片（垫底）"};
+        for (int p = 0; p < 2; ++p) {
+            if (p) ImGui::SameLine();
+            const bool sel = (ed.piece == p);
+            if (sel) ImGui::PushStyleColor(ImGuiCol_Button,
+                                           ImVec4(0.24f, 0.52f, 0.88f, 1.f));
+            if (ImGui::Button(kPieceLabels[p])) ed.setPiece(p);
+            if (sel) ImGui::PopStyleColor();
+            if (ed.viewReady(p, ed.view)) {
+                ImGui::SameLine();
+                ImGui::TextDisabled(ed.touched[p][ed.view] ? "*" : "✓");
+            }
+        }
+        ImGui::TextDisabled("前发=刘海/顶发（盖住脸），后发=后脑/垂发（垫在脸和"
+                            "衣服下面）。只画一片也行：另一片留空即视作没有。");
     }
     if (ed.view == fb::PartEditor::BACK) {
         ImGui::BeginDisabled(!ed.viewReady(fb::PartEditor::FRONT) || !templOk);
@@ -318,13 +349,23 @@ void drawPartEditor(AppState& st, PreviewTextures& tex) {
     if (ImGui::Button("保存到库")) {
         std::string err;
         const std::string dir = libRoot + "/" + ed.slot + "/" + ed.itemName;
-        if (!fb::saveEditorItem(ed, libRoot, err)) {
+        // v0.12.0: pass the region boxes so the drawing contract is enforced
+        // on save (out-of-box pixels refuse the save with a count).
+        // v0.12.0：带上轮廓框，保存时强制绘制契约（框外像素拒绝保存并报数）。
+        const bool haveBoxes = st.ensureRegions();
+        if (!fb::saveEditorItem(ed, libRoot, haveBoxes ? &st.regions : nullptr,
+                                err)) {
             libDlg.openResult("保存到库", "保存失败：" + err, "", false);
         } else {
-            const int viol = templOk ? fb::roleConstraintViolations(
-                                           ed.pixels[fb::PartEditor::FRONT],
-                                           st.templateSpec)
-                                     : 0;
+            // Warn about non-role colours across EVERY saved piece/view.
+            // 所有已存片/视图都查非角色色并警告。
+            int viol = 0;
+            if (templOk)
+                for (int p = 0; p < 2; ++p)
+                    for (int v = 0; v < 3; ++v)
+                        if (ed.viewReady(p, v))
+                            viol += fb::roleConstraintViolations(
+                                ed.pixels[p][v], st.templateSpec);
             // The dress-up tab must see the new item without a restart
             // (v0.11.1 bug B). / 换人 tab 必须不重启就看到新部件（v0.11.1 bug B）。
             st.invalidateLibrary();
@@ -401,18 +442,33 @@ void drawPartEditor(AppState& st, PreviewTextures& tex) {
     if (!templOk) {
         ImGui::TextWrapped("%s", st.templateError.c_str());
     } else {
-        cv::Mat& px = ed.pixels[ed.view];
+        cv::Mat& px = ed.pixels[ed.piece][ed.view];
         if (px.empty()) {
             ImGui::TextDisabled("此视图为空 —— 画一笔、导入图片，或从正面推断。");
         }
-        const cv::Mat& view = px.empty() ? ed.pixels[ed.view] : px;
+        const cv::Mat& view = px.empty() ? ed.pixels[ed.piece][ed.view] : px;
         // Empty views still get a canvas frame so layout stays put: draw a
         // scratch blank. / 空视图也画个画框稳定版面：用临时空白。
         cv::Mat scratch;
         const cv::Mat& draw = view.empty()
             ? (scratch = cv::Mat::zeros(ed.canvas, CV_8UC4)) : view;
-        const fb::ui::CanvasInput in =
-            tex.editorCanvas.draw("ed_canvas", draw, st.revision);
+        // Region-box shading (v0.12.0): paint everything OUTSIDE the current
+        // slot's drawing box flat grey, so the contract is visible while
+        // drawing (and stray pixels outside it are obvious).
+        // 轮廓框打灰（v0.12.0）：当前槽绘制框【外】统一刷成灰色，画的时候契约
+        // 看得见（框外的杂像素也一眼可见）。仅影响显示，不碰像素数据。
+        cv::Mat shaded;
+        if (st.ensureRegions() && st.regions.hasSlot(ed.slot)) {
+            shaded = draw.clone();
+            for (int y = 0; y < shaded.rows; ++y) {
+                cv::Vec4b* row = shaded.ptr<cv::Vec4b>(y);
+                for (int x = 0; x < shaded.cols; ++x)
+                    if (!st.regions.contains(ed.slot, x, y))
+                        row[x] = cv::Vec4b(48, 48, 48, 255);
+            }
+        }
+        const fb::ui::CanvasInput in = tex.editorCanvas.draw(
+            "ed_canvas", shaded.empty() ? draw : shaded, st.revision);
 
         ImGui::Spacing();
         ImGui::SliderInt("缩放", &tex.editorCanvas.zoom, 1, 24);

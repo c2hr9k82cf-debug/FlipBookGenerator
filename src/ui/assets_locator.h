@@ -22,6 +22,12 @@ std::string findChipsDir();
 // 搜索顺序与 findChipsDir 相同。
 std::string findTemplatePath();
 
+// Returns the full path of the region-box data (chibi_regions.json, v0.12.0),
+// or "" if not found. Same search order as findChipsDir.
+// 返回轮廓框数据（chibi_regions.json，v0.12.0）的完整路径，找不到则 ""。
+// 搜索顺序与 findChipsDir 相同。
+std::string findRegionsPath();
+
 // The USER parts library root (created on demand by the callers that write):
 //   ~/Library/Application Support/FlipBookGenerator/parts_library/
 // 用户部件库根目录（写入方按需创建）：

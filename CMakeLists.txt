@@ -264,6 +264,20 @@ add_test(
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
+# Editor box gate (v0.12.0): the save side of the drawing contract — an
+# in-box two-piece item round-trips byte-exact (front_b/side_b included), one
+# out-of-box pixel refuses the save with a count and writes nothing, back_b
+# needs the main back.png, a wrong-size piece is refused.
+# 编辑器框闸门（v0.12.0）：绘制契约的保存侧 —— 框内双片件逐字节往返（含
+# front_b/side_b）；一个框外像素即拒绝保存、报数、且不写盘；back_b 需要主片
+# back.png；坏尺寸片被拒。
+add_test(
+    NAME editor_box
+    COMMAND flipbook --editor-box-gate
+            --templates ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
 # D3 layering gate (v0.12.0): the back piece beds down under the face, the
 # front piece covers it, bare skin defends the arms, the back view crosses
 # the pieces (mirror rules), single-piece items stamp twice.

@@ -171,6 +171,7 @@ void printCliUsage() {
         "      逐字节、无脸色残留、alpha 不变量；与手绘的偏差如实报告不失败）。\n"
         "\n"
         "  flipbook --fill-gate [--templates DIR] [--assets DIR]\n"
+        "  flipbook --editor-box-gate [--templates DIR]\n"
         "      Part-editor fill gate (v0.10.0): blank template -> in-tool fill ->\n"
         "      legal library item. Blank interior recolours exactly (outline\n"
         "      untouched), brush/eraser/one-step-undo round-trip byte-exact,\n"
@@ -254,6 +255,7 @@ struct CliArgs {
     bool backinferGate      = false;
     bool fillGate           = false;
     bool regionGate         = false;   // v0.12.0 drawing contract / 绘制契约
+    bool editorBoxGate      = false;   // v0.12.0 save-side contract / 保存侧契约
     bool composeLayersGate  = false;   // v0.12.0 D3 layering / D3 层序
 
     // Composer (v0.10.1) / 合成器（v0.10.1）
@@ -327,6 +329,8 @@ bool parseArgs(int argc, char** argv, CliArgs& a, std::string& err) {
             a.fillGate = true;
         } else if (s == "--region-gate") {
             a.regionGate = true;
+        } else if (s == "--editor-box-gate") {
+            a.editorBoxGate = true;
         } else if (s == "--compose-layers-gate") {
             a.composeLayersGate = true;
         } else if (s == "--compose") {
@@ -1813,9 +1817,9 @@ int runFillGate(const CliArgs& a) {
             const int nOutline = countCol(blank, cOutline);
             fb::PartEditor ed;
             ed.blank(spec.size);
-            ed.pixels[0] = blank.clone();
+            ed.pixels[0][0] = blank.clone();
             ed.fillRole(0, cWhite, cHairMid);
-            const cv::Mat& got = ed.pixels[0];
+            const cv::Mat& got = ed.pixels[0][0];
             bool ok = true;
             if (countCol(got, cWhite) != 0) {
                 std::cout << "  fill: white residue after fill   FAIL\n";
@@ -1857,16 +1861,16 @@ int runFillGate(const CliArgs& a) {
         ed.paint(fb::PartEditor::FRONT, -1, 99, cSkin);   // ignored / 越界忽略
         ed.undo();
         bool ok = true;
-        if (px(ed.pixels[0], 5, 5) != cv::Vec4b(cHairDark[0], cHairDark[1], cHairDark[2], 255)) {
+        if (px(ed.pixels[0][0], 5, 5) != cv::Vec4b(cHairDark[0], cHairDark[1], cHairDark[2], 255)) {
             std::cout << "  undo: (5,5) not restored to the snapshot   FAIL\n";
             ++failures; ok = false;
         }
-        if (px(ed.pixels[0], 7, 3)[3] != 0) {
+        if (px(ed.pixels[0][0], 7, 3)[3] != 0) {
             std::cout << "  undo: (7,3) paint survived undo   FAIL\n";
             ++failures; ok = false;
         }
         ed.erase(fb::PartEditor::FRONT, 5, 5);
-        if (px(ed.pixels[0], 5, 5)[3] != 0) {
+        if (px(ed.pixels[0][0], 5, 5)[3] != 0) {
             std::cout << "  eraser: (5,5) not transparent   FAIL\n";
             ++failures; ok = false;
         }
@@ -1884,17 +1888,17 @@ int runFillGate(const CliArgs& a) {
             std::cout << "  back: cannot read character_32.png   FAIL\n";
             ++failures;
         } else {
-            ed.pixels[0] = refFront.clone();
+            ed.pixels[0][0] = refFront.clone();
             if (!ed.inferBack(spec, err)) {
                 std::cout << "  back: infer FAILED: " << err << "   FAIL\n";
                 ++failures;
             } else {
                 bool ok = true;
-                if (!sameAlpha(ed.pixels[0], ed.pixels[2])) {
+                if (!sameAlpha(ed.pixels[0][0], ed.pixels[0][2])) {
                     std::cout << "  back: alpha invariant broken   FAIL\n";
                     ++failures; ok = false;
                 }
-                const int viol = fb::roleConstraintViolations(ed.pixels[2], spec);
+                const int viol = fb::roleConstraintViolations(ed.pixels[0][2], spec);
                 if (viol != 0) {
                     std::cout << "  back: " << viol
                               << " pixels violate the role constraint   FAIL\n";
@@ -1919,11 +1923,11 @@ int runFillGate(const CliArgs& a) {
         ed.slot = "hair";
         const cv::Mat rf = cv::imread(a.assets + "/character_32.png", cv::IMREAD_UNCHANGED);
         const cv::Mat rs = cv::imread(a.assets + "/character_32_side.png", cv::IMREAD_UNCHANGED);
-        ed.pixels[0] = rf.clone();
-        ed.pixels[1] = rs.clone();
+        ed.pixels[0][0] = rf.clone();
+        ed.pixels[0][1] = rs.clone();
 
         bool ok = true;
-        if (!fb::saveEditorItem(ed, lib.string(), err)) {
+        if (!fb::saveEditorItem(ed, lib.string(), nullptr, err)) {
             std::cout << "  save: FAILED: " << err << "   FAIL\n";
             ++failures; ok = false;
         } else if (fs::exists(lib / "hair/roundtrip_test/back.png")) {
@@ -1936,12 +1940,12 @@ int runFillGate(const CliArgs& a) {
                 std::cout << "  load: FAILED: " << err << "   FAIL\n";
                 ++failures; ok = false;
             } else {
-                if (countPixelDiff(ed2.pixels[0], ed.pixels[0]) != 0 ||
-                    countPixelDiff(ed2.pixels[1], ed.pixels[1]) != 0) {
+                if (countPixelDiff(ed2.pixels[0][0], ed.pixels[0][0]) != 0 ||
+                    countPixelDiff(ed2.pixels[0][1], ed.pixels[0][1]) != 0) {
                     std::cout << "  save->load: views not byte-identical   FAIL\n";
                     ++failures; ok = false;
                 }
-                if (!ed2.pixels[2].empty()) {
+                if (!ed2.pixels[0][2].empty()) {
                     std::cout << "  save->load: back appeared from nowhere   FAIL\n";
                     ++failures; ok = false;
                 }
@@ -1950,7 +1954,7 @@ int runFillGate(const CliArgs& a) {
         // Now with an inferred back (item.json must flip to back:"file").
         // 再带推断背面存一次（item.json 必须翻成 back:"file"）。
         if (ok && ed.inferBack(spec, err) &&
-            fb::saveEditorItem(ed, lib.string(), err)) {
+            fb::saveEditorItem(ed, lib.string(), nullptr, err)) {
             if (!fs::exists(lib / "hair/roundtrip_test/back.png")) {
                 std::cout << "  save: back.png missing although back is drawn   FAIL\n";
                 ++failures; ok = false;
@@ -1958,7 +1962,7 @@ int runFillGate(const CliArgs& a) {
                 fb::PartEditor ed3;
                 if (!fb::loadEditorItem(ed3, (lib / "hair/roundtrip_test").string(),
                                         "hair", spec.size, err) ||
-                    countPixelDiff(ed3.pixels[2], ed.pixels[2]) != 0) {
+                    countPixelDiff(ed3.pixels[0][2], ed.pixels[0][2]) != 0) {
                     std::cout << "  save->load: back not byte-identical   FAIL\n";
                     ++failures; ok = false;
                 }
@@ -1969,7 +1973,7 @@ int runFillGate(const CliArgs& a) {
         }
         // Name validation. / 名称校验。
         ed.itemName = "bad/name";
-        if (fb::saveEditorItem(ed, lib.string(), err)) {
+        if (fb::saveEditorItem(ed, lib.string(), nullptr, err)) {
             std::cout << "  save: slash name accepted   FAIL\n";
             ++failures; ok = false;
         }
@@ -2019,19 +2023,19 @@ int runFillGate(const CliArgs& a) {
         // Back in hair: the old paint survives, top's paint does not follow.
         // 回到 hair：旧笔画还在，top 的笔画不跟过来。
         if (!ed.viewReady(fb::PartEditor::FRONT) ||
-            px(ed.pixels[0], 4, 4) !=
+            px(ed.pixels[0][0], 4, 4) !=
                 cv::Vec4b(cHairMid[0], cHairMid[1], cHairMid[2], 255)) {
             std::cout << "  slot-switch: hair draft not restored   FAIL\n";
             ++failures; ok = false;
         }
         if (ed.viewReady(fb::PartEditor::FRONT) &&
-            px(ed.pixels[0], 9, 9)[3] != 0) {
+            px(ed.pixels[0][0], 9, 9)[3] != 0) {
             std::cout << "  slot-switch: top pixels leaked into hair   FAIL\n";
             ++failures; ok = false;
         }
         ed.switchSlot("top");
         if (!ed.viewReady(fb::PartEditor::FRONT) ||
-            px(ed.pixels[0], 9, 9) !=
+            px(ed.pixels[0][0], 9, 9) !=
                 cv::Vec4b(cSkin[0], cSkin[1], cSkin[2], 255)) {
             std::cout << "  slot-switch: top draft not restored   FAIL\n";
             ++failures; ok = false;
@@ -2040,6 +2044,225 @@ int runFillGate(const CliArgs& a) {
     }
 
     std::cout << (failures ? "FILL GATE FAIL\n" : "FILL GATE OK\n");
+    return failures ? 1 : 0;
+}
+
+// Editor region-box gate (v0.12.0) — the SAVE side of the drawing contract:
+// an in-box two-piece item saves and round-trips byte-exact (front_b/side_b
+// included), a single out-of-box pixel refuses the save with a count AND
+// writes nothing, back_b.png is refused without a main back.png (inference
+// owns the back pieces in auto mode), and a wrong-size piece is refused.
+// 编辑器轮廓框闸门（v0.12.0）—— 绘制契约的保存侧：框内双片件保存并逐字节往返
+// （含 front_b/side_b）；一个框外像素即拒绝保存、报出数量、且什么都不写；
+// 没有主片 back.png 时 back_b.png 被拒（auto 模式下背面由推断拥有）；
+// 坏尺寸片被拒。
+int runEditorBoxGate(const CliArgs& a) {
+    int failures = 0;
+    std::string err;
+    fb::TemplateSpec spec;
+    if (!fb::loadTemplateSpec(a.templates + "/chibi_standard.json", spec, err)) {
+        std::cout << "template load FAILED: " << err << "   FAIL\n";
+        return 1;
+    }
+    fb::RegionBoxes boxes;
+    if (!fb::loadRegions(a.templates + "/chibi_regions.json", boxes, err)) {
+        std::cout << "loadRegions: " << err << "   FAIL\n";
+        return 1;
+    }
+    // One in-box and one out-of-box cell for hair (the two-piece slot). The
+    // hair box x9-22 is mirror-symmetric, so an in-box pixel stays in-box
+    // after inferBack's horizontal mirror.
+    // 给 hair 槽（双片槽）各挑一格框内、框外。hair 框 x9-22 左右对称，
+    // 所以框内像素经 inferBack 水平镜像后仍在框内。
+    int inX = -1, inY = -1, outX = -1, outY = -1;
+    for (int y = 0; y < boxes.cell && (inX < 0 || outX < 0); ++y)
+        for (int x = 0; x < boxes.cell && (inX < 0 || outX < 0); ++x) {
+            if (boxes.contains("hair", x, y)) {
+                if (inX < 0) { inX = x; inY = y; }
+            } else if (outX < 0) {
+                outX = x; outY = y;
+            }
+        }
+    if (inX < 0 || outX < 0) {
+        std::cout << "hair box has no in/out cell   FAIL\n";
+        return 1;
+    }
+
+    namespace fs = std::filesystem;
+    const fs::path lib =
+        fs::temp_directory_path() / "flipbook_editor_box_gate_lib";
+    std::error_code ec;
+    fs::remove_all(lib, ec);
+
+    cv::Vec3b cHairMid;
+    if (!spec.roleBgr("hair_mid", cHairMid)) {
+        std::cout << "palette missing 'hair_mid'   FAIL\n";
+        return 1;
+    }
+
+    // ---- 1. in-box two-piece save -> load round trip ----
+    // ---- 1. 框内双片保存 -> 读回往返 ----
+    {
+        fb::PartEditor ed;
+        ed.blank(spec.size);
+        ed.slot = "hair";
+        ed.itemName = "inbox_test";
+        ed.paint(fb::PartEditor::FRONT, inX, inY, cHairMid);   // main front
+        ed.paint(fb::PartEditor::SIDE, inX, inY, cHairMid);    // main side
+        ed.setPiece(fb::PartEditor::BACKP);
+        ed.paint(fb::PartEditor::FRONT, inX, inY, cHairMid);   // back-piece front
+        ed.paint(fb::PartEditor::SIDE, inX, inY, cHairMid);    // back-piece side
+        ed.setPiece(fb::PartEditor::MAIN);
+        bool ok = true;
+        if (!fb::saveEditorItem(ed, lib.string(), &boxes, err)) {
+            std::cout << "  in-box: save refused: " << err << "   FAIL\n";
+            ++failures; ok = false;
+        } else {
+            for (const char* f :
+                 {"front.png", "side.png", "front_b.png", "side_b.png"}) {
+                if (!fs::exists(lib / "hair" / "inbox_test" / f)) {
+                    std::cout << "  in-box: missing " << f << "   FAIL\n";
+                    ++failures; ok = false;
+                }
+            }
+            fb::PartEditor ed2;
+            if (!fb::loadEditorItem(ed2, (lib / "hair/inbox_test").string(),
+                                    "hair", spec.size, err)) {
+                std::cout << "  in-box: load FAILED: " << err << "   FAIL\n";
+                ++failures; ok = false;
+            } else {
+                for (int p = 0; p < 2; ++p)
+                    for (int v = 0; v < 2; ++v)
+                        if (countPixelDiff(ed2.pixels[p][v], ed.pixels[p][v]) !=
+                            0) {
+                            std::cout << "  in-box: piece " << p << " view " << v
+                                      << " not byte-identical   FAIL\n";
+                            ++failures; ok = false;
+                        }
+                if (ed2.viewReady(fb::PartEditor::MAIN, fb::PartEditor::BACK) ||
+                    ed2.viewReady(fb::PartEditor::BACKP, fb::PartEditor::BACK)) {
+                    std::cout << "  in-box: back appeared from nowhere   FAIL\n";
+                    ++failures; ok = false;
+                }
+            }
+        }
+        if (ok) std::cout << "  in-box two-piece round trip byte-exact   OK\n";
+    }
+
+    // ---- 2. out-of-box pixel refused with a count; nothing written ----
+    // ---- 2. 框外像素拒绝并报数；什么都不写 ----
+    {
+        fb::PartEditor ed;
+        ed.blank(spec.size);
+        ed.slot = "hair";
+        ed.itemName = "outbox_test";
+        ed.paint(fb::PartEditor::FRONT, inX, inY, cHairMid);
+        ed.paint(fb::PartEditor::SIDE, inX, inY, cHairMid);
+        ed.paint(fb::PartEditor::FRONT, outX, outY, cHairMid);   // violation
+        bool ok = true;
+        if (fb::saveEditorItem(ed, lib.string(), &boxes, err)) {
+            std::cout << "  out-of-box: save accepted   FAIL\n";
+            ++failures; ok = false;
+        } else {
+            if (err.find("个像素画出了") == std::string::npos) {
+                std::cout << "  out-of-box: wrong error: " << err << "   FAIL\n";
+                ++failures; ok = false;
+            }
+            if (fs::exists(lib / "hair" / "outbox_test")) {
+                std::cout << "  out-of-box: files written although refused"
+                          << "   FAIL\n";
+                ++failures; ok = false;
+            }
+        }
+        // Erase the stray pixel -> the clean save passes.
+        // 擦掉杂像素 -> 干净保存放行。
+        ed.erase(fb::PartEditor::FRONT, outX, outY);
+        if (ok && !fb::saveEditorItem(ed, lib.string(), &boxes, err)) {
+            std::cout << "  out-of-box: clean re-save refused: " << err
+                      << "   FAIL\n";
+            ++failures; ok = false;
+        } else if (ok) {
+            std::cout << "  out-of-box refused with count, clean re-save OK"
+                      << "   OK\n";
+        }
+    }
+
+    // ---- 3. back_b.png requires the main back.png ----
+    // ---- 3. back_b.png 需要主片的 back.png ----
+    {
+        fb::PartEditor ed;
+        ed.blank(spec.size);
+        ed.slot = "hair";
+        ed.itemName = "backb_test";
+        ed.paint(fb::PartEditor::FRONT, inX, inY, cHairMid);
+        ed.paint(fb::PartEditor::SIDE, inX, inY, cHairMid);
+        ed.setPiece(fb::PartEditor::BACKP);
+        ed.paint(fb::PartEditor::BACK, inX, inY, cHairMid);   // back piece has back
+        ed.setPiece(fb::PartEditor::MAIN);                    // main back un-drawn
+        bool ok = true;
+        if (fb::saveEditorItem(ed, lib.string(), &boxes, err)) {
+            std::cout << "  back_b without back: save accepted   FAIL\n";
+            ++failures; ok = false;
+        } else if (err.find("垫底片") == std::string::npos) {
+            std::cout << "  back_b without back: wrong error: " << err
+                      << "   FAIL\n";
+            ++failures; ok = false;
+        }
+        // Infer the main back -> legal now, both back sprites land and the
+        // back piece round-trips. / 推断主片背面 -> 现在合法，两张背面图落盘，
+        // 垫底片往返一致。
+        if (ok && ed.inferBack(spec, err) &&
+            fb::saveEditorItem(ed, lib.string(), &boxes, err)) {
+            if (!fs::exists(lib / "hair" / "backb_test" / "back.png") ||
+                !fs::exists(lib / "hair" / "backb_test" / "back_b.png")) {
+                std::cout << "  back_b: back.png/back_b.png missing after infer"
+                          << "   FAIL\n";
+                ++failures; ok = false;
+            } else {
+                fb::PartEditor ed2;
+                if (!fb::loadEditorItem(ed2, (lib / "hair/backb_test").string(),
+                                        "hair", spec.size, err)) {
+                    std::cout << "  back_b: load FAILED: " << err << "   FAIL\n";
+                    ++failures; ok = false;
+                } else if (countPixelDiff(ed2.pixels[1][2], ed.pixels[1][2]) !=
+                               0 ||
+                           countPixelDiff(ed2.pixels[0][2], ed.pixels[0][2]) !=
+                               0) {
+                    std::cout << "  back_b: back views not byte-identical"
+                              << "   FAIL\n";
+                    ++failures; ok = false;
+                }
+            }
+        } else if (ok) {
+            std::cout << "  back_b: save after infer FAILED: " << err
+                      << "   FAIL\n";
+            ++failures; ok = false;
+        }
+        if (ok) std::cout << "  back_b needs back; both land and round-trip"
+                          << "   OK\n";
+    }
+
+    // ---- 4. wrong-size piece refused ----
+    // ---- 4. 坏尺寸片拒绝 ----
+    {
+        fb::PartEditor ed;
+        ed.blank(spec.size);
+        ed.slot = "hair";
+        ed.itemName = "badsize_test";
+        ed.paint(fb::PartEditor::FRONT, inX, inY, cHairMid);
+        ed.paint(fb::PartEditor::SIDE, inX, inY, cHairMid);
+        ed.pixels[fb::PartEditor::MAIN][fb::PartEditor::SIDE] =
+            cv::Mat::zeros(16, 16, CV_8UC4);
+        if (fb::saveEditorItem(ed, lib.string(), &boxes, err)) {
+            std::cout << "  bad-size: save accepted   FAIL\n";
+            ++failures;
+        } else {
+            std::cout << "  bad-size piece refused   OK\n";
+        }
+    }
+
+    fs::remove_all(lib, ec);
+    std::cout << (failures ? "EDITOR BOX GATE FAIL\n" : "EDITOR BOX GATE OK\n");
     return failures ? 1 : 0;
 }
 
@@ -3114,6 +3337,7 @@ int runCli(int argc, char** argv) {
     if (a.backinferGate)      return runBackinferGate(a);
     if (a.fillGate)           return runFillGate(a);
     if (a.regionGate)         return runRegionGate(a);
+    if (a.editorBoxGate)      return runEditorBoxGate(a);
     if (a.composeLayersGate)  return runComposeLayersGate(a);
     if (a.compose)     return runCompose(a);
     if (a.composeGate) return runComposeGate(a);

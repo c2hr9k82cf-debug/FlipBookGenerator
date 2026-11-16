@@ -43,6 +43,16 @@ bool tryTemplate(const fs::path& root, std::string& out) {
     return false;
 }
 
+// The region-box JSON sits beside the template. / 轮廓框 JSON 与模板同区。
+bool tryRegions(const fs::path& root, std::string& out) {
+    std::error_code ec;
+    for (const fs::path& p : {root / "chibi_regions.json",
+                              root / "templates" / "chibi_regions.json"}) {
+        if (fs::is_regular_file(p, ec)) { out = p.string(); return true; }
+    }
+    return false;
+}
+
 // Shaped blank: <assets>/parts/_blank/<slot>_<view>.png. / 形状空白模板。
 bool tryBlank(const fs::path& root, const std::string& slot,
               const std::string& view, std::string& out) {
@@ -106,6 +116,23 @@ std::string findTemplatePath() {
     if (tryTemplate(exe / ".." / ".." / "assets", found)) return found;
     if (tryTemplate(exe / "assets", found)) return found;
     if (tryTemplate(fs::current_path() / "assets", found)) return found;
+
+    return "";
+}
+
+std::string findRegionsPath() {
+    std::string found;
+
+    if (const char* env = std::getenv("FLIPBOOK_ASSETS")) {
+        if (tryRegions(env, found)) return found;
+    }
+
+    const fs::path exe = executableDir();
+
+    if (tryRegions(exe / ".." / "Resources" / "assets", found)) return found;
+    if (tryRegions(exe / ".." / ".." / "assets", found)) return found;
+    if (tryRegions(exe / "assets", found)) return found;
+    if (tryRegions(fs::current_path() / "assets", found)) return found;
 
     return "";
 }

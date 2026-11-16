@@ -26,113 +26,130 @@ int keyOf(const cv::Vec3b& c) {
 
 }  // namespace
 
-bool PartEditor::viewReady(int v) const {
-    return v >= 0 && v < 3 && !pixels[v].empty();
+bool PartEditor::viewReady(int p, int v) const {
+    return p >= 0 && p < 2 && v >= 0 && v < 3 && !pixels[p][v].empty();
 }
 
 void PartEditor::blank(cv::Size sz) {
     canvas = sz;
-    for (int v = 0; v < 3; ++v) {
-        // Views start EMPTY — "not drawn yet" is distinct from "drawn all
-        // transparent", and only drawn views may be saved (back:"auto" vs
-        // back:"file" depends on it). The canvas is created on first paint.
-        // 视图从"空"开始 —— "还没画"与"画了全透明"不同，只有画过的视图才入库
-        // （back:"auto" 与 back:"file" 靠它区分）。画布在第一笔时才创建。
-        pixels[v] = cv::Mat();
-        undoSnap[v] = cv::Mat();
-        touched[v] = false;
-    }
+    for (int p = 0; p < 2; ++p)
+        for (int v = 0; v < 3; ++v) {
+            // Views start EMPTY — "not drawn yet" is distinct from "drawn all
+            // transparent", and only drawn views may be saved (back:"auto" vs
+            // back:"file" depends on it). The canvas is created on first paint.
+            // 视图从"空"开始 —— "还没画"与"画了全透明"不同，只有画过的视图才入库
+            // （back:"auto" 与 back:"file" 靠它区分）。画布在第一笔时才创建。
+            pixels[p][v] = cv::Mat();
+            undoSnap[p][v] = cv::Mat();
+            touched[p][v] = false;
+        }
     hasUndo = false;
     view = FRONT;
+    piece = MAIN;
 }
 
 void PartEditor::setView(int v) {
     if (v >= 0 && v < 3) view = v;
 }
 
+void PartEditor::setPiece(int p) {
+    if (p >= 0 && p < 2) piece = p;
+}
+
 // Switch slots with draft stash/restore (v0.11.1 bug B7). The work canvas
-// belongs to one slot only: the whole view set stashes into drafts[old], the
-// target slot's set comes back (or a fresh empty one). The single undo step
-// belongs to the old canvas and dies with it.
-// 切槽并暂存/恢复草稿（v0.11.1 bug B7）。工作画布只属于一个槽：整套视图存进
-// drafts[旧槽]，目标槽的整套取回来（没有就是全新空件）。单步撤销属于旧画布，
+// belongs to one slot only: the whole [piece][view] set stashes into
+// drafts[old], the target slot's set comes back (or a fresh empty one). The
+// single undo step belongs to the old canvas and dies with it.
+// 切槽并暂存/恢复草稿（v0.11.1 bug B7）。工作画布只属于一个槽：整套 [片][视图]
+// 存进 drafts[旧槽]，目标槽的整套取回来（没有就是全新空件）。单步撤销属于旧画布，
 // 随之作废。
 void PartEditor::switchSlot(const std::string& newSlot) {
     if (newSlot.empty() || newSlot == slot) return;
     Draft out;
-    for (int v = 0; v < 3; ++v) {
-        out.pixels[v] = pixels[v];
-        out.touched[v] = touched[v];
-    }
+    for (int p = 0; p < 2; ++p)
+        for (int v = 0; v < 3; ++v) {
+            out.pixels[p][v] = pixels[p][v];
+            out.touched[p][v] = touched[p][v];
+        }
     out.itemName = itemName;
+    out.piece = piece;
     drafts[slot] = out;
 
     const auto it = drafts.find(newSlot);
     if (it != drafts.end()) {
-        for (int v = 0; v < 3; ++v) {
-            pixels[v] = it->second.pixels[v];
-            touched[v] = it->second.touched[v];
-        }
+        for (int p = 0; p < 2; ++p)
+            for (int v = 0; v < 3; ++v) {
+                pixels[p][v] = it->second.pixels[p][v];
+                touched[p][v] = it->second.touched[p][v];
+            }
         itemName = it->second.itemName;
+        piece = it->second.piece;
         drafts.erase(it);
     } else {
         // Same contract as blank(): views start EMPTY ("not drawn yet" is
         // distinct from "drawn all transparent"). / 与 blank() 同契约：视图
         // 从"空"开始（"还没画"与"画了全透明"不同）。
-        for (int v = 0; v < 3; ++v) {
-            pixels[v] = cv::Mat();
-            touched[v] = false;
-        }
+        for (int p = 0; p < 2; ++p)
+            for (int v = 0; v < 3; ++v) {
+                pixels[p][v] = cv::Mat();
+                touched[p][v] = false;
+            }
         itemName = "untitled";
+        piece = MAIN;
     }
-    for (int v = 0; v < 3; ++v) undoSnap[v] = cv::Mat();
+    for (int p = 0; p < 2; ++p)
+        for (int v = 0; v < 3; ++v) undoSnap[p][v] = cv::Mat();
     hasUndo = false;
     slot = newSlot;
 }
 
 void PartEditor::snapshot() {
-    for (int v = 0; v < 3; ++v) undoSnap[v] = pixels[v].clone();
+    for (int p = 0; p < 2; ++p)
+        for (int v = 0; v < 3; ++v) undoSnap[p][v] = pixels[p][v].clone();
     hasUndo = true;
 }
 
 void PartEditor::undo() {
     if (!hasUndo) return;
-    for (int v = 0; v < 3; ++v) pixels[v] = undoSnap[v];
+    for (int p = 0; p < 2; ++p)
+        for (int v = 0; v < 3; ++v) pixels[p][v] = undoSnap[p][v];
     hasUndo = false;
 }
 
 // Create the canvas on first edit. / 第一笔编辑时创建画布。
-void PartEditor::ensureCanvas(int v) {
-    if (v < 0 || v >= 3) return;
-    if (pixels[v].empty()) pixels[v] = cv::Mat::zeros(canvas, CV_8UC4);
+void PartEditor::ensureCanvas(int p, int v) {
+    if (p < 0 || p >= 2 || v < 0 || v >= 3) return;
+    if (pixels[p][v].empty()) pixels[p][v] = cv::Mat::zeros(canvas, CV_8UC4);
 }
 
 void PartEditor::paint(int v, int x, int y, const cv::Vec3b& bgr) {
     if (v < 0 || v >= 3) return;
-    ensureCanvas(v);
-    if (x < 0 || y < 0 || x >= pixels[v].cols || y >= pixels[v].rows) return;
-    pixels[v].at<cv::Vec4b>(y, x) = cv::Vec4b(bgr[0], bgr[1], bgr[2], 255);
-    touched[v] = true;
+    ensureCanvas(piece, v);
+    cv::Mat& img = pixels[piece][v];
+    if (x < 0 || y < 0 || x >= img.cols || y >= img.rows) return;
+    img.at<cv::Vec4b>(y, x) = cv::Vec4b(bgr[0], bgr[1], bgr[2], 255);
+    touched[piece][v] = true;
 }
 
 void PartEditor::erase(int v, int x, int y) {
     if (v < 0 || v >= 3) return;
-    ensureCanvas(v);
-    if (x < 0 || y < 0 || x >= pixels[v].cols || y >= pixels[v].rows) return;
-    pixels[v].at<cv::Vec4b>(y, x) = cv::Vec4b(0, 0, 0, 0);
-    touched[v] = true;
+    ensureCanvas(piece, v);
+    cv::Mat& img = pixels[piece][v];
+    if (x < 0 || y < 0 || x >= img.cols || y >= img.rows) return;
+    img.at<cv::Vec4b>(y, x) = cv::Vec4b(0, 0, 0, 0);
+    touched[piece][v] = true;
 }
 
 void PartEditor::fillRole(int v, const cv::Vec3b& fromBgr, const cv::Vec3b& toBgr) {
     if (v < 0 || v >= 3) return;
-    ensureCanvas(v);
+    ensureCanvas(piece, v);
     // Same exact src->dst path as chip reskin (parts_semantics gate covers its
     // semantics: near-miss colours survive, alpha preserved).
     // 与芯片换皮同一条精确 src→dst 路径（parts_semantics 闸门已覆盖其语义：
     // 近似色幸存、alpha 保留）。
     const std::vector<PartLayer::RoleColor> roles = {{"", fromBgr, toBgr}};
-    applyPaletteRoles(pixels[v], roles);
-    touched[v] = true;
+    applyPaletteRoles(pixels[piece][v], roles);
+    touched[piece][v] = true;
 }
 
 bool PartEditor::inferBack(const TemplateSpec& spec, std::string& err) {
@@ -140,16 +157,16 @@ bool PartEditor::inferBack(const TemplateSpec& spec, std::string& err) {
         err = "需要正面视图才能推断背面";
         return false;
     }
-    const cv::Mat side = viewReady(SIDE) ? pixels[SIDE] : cv::Mat();
-    cv::Mat back = inferBackView(pixels[FRONT], side, spec, err);
+    const cv::Mat side = viewReady(SIDE) ? pixels[piece][SIDE] : cv::Mat();
+    cv::Mat back = inferBackView(pixels[piece][FRONT], side, spec, err);
     if (back.empty()) return false;
-    pixels[BACK] = back;
-    touched[BACK] = true;
+    pixels[piece][BACK] = back;
+    touched[piece][BACK] = true;
     return true;
 }
 
 bool saveEditorItem(const PartEditor& ed, const std::string& libraryRoot,
-                    std::string& err) {
+                    const RegionBoxes* boxes, std::string& err) {
     // Names become folder names — no separators, no empties.
     // 名字即目录名 —— 不许带分隔符、不许为空。
     if (ed.itemName.empty() ||
@@ -161,15 +178,44 @@ bool saveEditorItem(const PartEditor& ed, const std::string& libraryRoot,
         err = "非法槽位名: " + ed.slot;
         return false;
     }
-    if (!ed.viewReady(PartEditor::FRONT) || !ed.viewReady(PartEditor::SIDE)) {
+    if (!ed.viewReady(PartEditor::MAIN, PartEditor::FRONT) ||
+        !ed.viewReady(PartEditor::MAIN, PartEditor::SIDE)) {
         err = "正面与侧面必须都有图才能入库";
         return false;
     }
-    for (int v = 0; v < 2; ++v) {
-        if (ed.pixels[v].size() != ed.canvas || ed.pixels[v].type() != CV_8UC4) {
-            err = "视图必须是 " + std::to_string(ed.canvas.width) + "x" +
-                  std::to_string(ed.canvas.height) + " BGRA";
-            return false;
+    // Loader rule: back:"auto" must NOT have back_b.png (inference owns the
+    // back pieces there). / 载入器规则：back:"auto" 不得有 back_b.png（推断拥有
+    // 背面两片）。
+    const bool hasBack = ed.viewReady(PartEditor::MAIN, PartEditor::BACK);
+    if (!hasBack && ed.viewReady(PartEditor::BACKP, PartEditor::BACK)) {
+        err = "垫底片画了背面，主片也得有背面（可先推断）才能入库";
+        return false;
+    }
+
+    // Validate EVERYTHING before writing anything (v0.12.0): size, type and
+    // the region-box drawing contract. A half-saved item is worse than none.
+    // 写任何东西之前先校验一切（v0.12.0）：尺寸、类型与轮廓框绘制契约。
+    // 半成品部件比没有更糟。
+    for (int p = 0; p < 2; ++p) {
+        for (int v = 0; v < 3; ++v) {
+            if (!ed.viewReady(p, v)) continue;
+            const cv::Mat& img = ed.pixels[p][v];
+            if (img.size() != ed.canvas || img.type() != CV_8UC4) {
+                err = "视图必须是 " + std::to_string(ed.canvas.width) + "x" +
+                      std::to_string(ed.canvas.height) + " BGRA";
+                return false;
+            }
+            if (boxes && boxes->hasSlot(ed.slot)) {
+                const int bad = outOfBoxPixels(img, ed.slot, *boxes);
+                if (bad > 0) {
+                    static const char* kPieceName[2] = {"", "垫底片"};
+                    static const char* kViewName[3] = {"正面", "侧面", "背面"};
+                    err = std::string(kPieceName[p]) + kViewName[v] + "有 " +
+                          std::to_string(bad) + " 个像素画出了" + ed.slot +
+                          "槽的轮廓框（框外打灰的格子不可着色）";
+                    return false;
+                }
+            }
         }
     }
 
@@ -181,17 +227,17 @@ bool saveEditorItem(const PartEditor& ed, const std::string& libraryRoot,
         return false;
     }
 
-    const char* names[3] = {"front.png", "side.png", "back.png"};
-    for (int v = 0; v < 3; ++v) {
-        if (!ed.viewReady(v)) continue;
-        if (!cv::imwrite((dir / names[v]).string(), ed.pixels[v])) {
-            err = "写图失败: " + (dir / names[v]).string();
-            return false;
+    const char* names[2][3] = {{"front.png", "side.png", "back.png"},
+                               {"front_b.png", "side_b.png", "back_b.png"}};
+    for (int p = 0; p < 2; ++p) {
+        for (int v = 0; v < 3; ++v) {
+            if (!ed.viewReady(p, v)) continue;
+            if (!cv::imwrite((dir / names[p][v]).string(), ed.pixels[p][v])) {
+                err = "写图失败: " + (dir / names[p][v]).string();
+                return false;
+            }
         }
     }
-    // Loader rule: back:"auto" must NOT have back.png and back:"file" must.
-    // 载入器规则：back:"auto" 不得有 back.png，back:"file" 必须有。
-    const bool hasBack = ed.viewReady(PartEditor::BACK);
 
     std::ofstream f(dir / "item.json");
     if (!f) {
@@ -220,11 +266,14 @@ bool loadEditorItem(PartEditor& ed, const std::string& itemDir,
     ed.blank(expectedSize);
     ed.slot = slot;
     ed.itemName = item.name;
-    const int map[3] = {PartEditor::FRONT, PartEditor::SIDE, PartEditor::BACK};
     for (int i = 0; i < 3; ++i) {
         if (!item.views[i].empty()) {
-            ed.pixels[map[i]] = item.views[i].clone();
-            ed.touched[map[i]] = false;
+            ed.pixels[PartEditor::MAIN][i] = item.views[i].clone();
+            ed.touched[PartEditor::MAIN][i] = false;
+        }
+        if (item.hasB[i]) {
+            ed.pixels[PartEditor::BACKP][i] = item.viewsB[i].clone();
+            ed.touched[PartEditor::BACKP][i] = false;
         }
     }
     return true;

@@ -264,6 +264,28 @@ bool AppState::ensureTemplate() {
     return true;
 }
 
+bool AppState::ensureRegions() {
+    if (regionsReady) return true;
+    regionsError.clear();
+    static std::string cachedPath;   // resolved once / 只解析一次
+    if (cachedPath.empty()) cachedPath = findRegionsPath();
+    if (cachedPath.empty()) {
+        // Not a hard error: the editor simply shows no grey and the save
+        // skips the box check (old installs may lack the file).
+        // 不算硬错：编辑器只是不打灰、保存跳过框校验（旧安装可能没这文件）。
+        regionsError = "找不到轮廓框数据（chibi_regions.json），本次不做框校验。";
+        regionsReady = true;
+        return false;
+    }
+    if (!fb::loadRegions(cachedPath, regions, regionsError)) {
+        regionsReady = true;   // don't retry a broken file every frame /
+                               // 坏文件不逐帧重试
+        return false;
+    }
+    regionsReady = true;
+    return true;
+}
+
 bool AppState::editorImport(const std::string& path) {
     cv::Mat img;
     if (!fb::loadImageBgra(path, img)) {
@@ -297,10 +319,10 @@ void AppState::resetImport() {
     // Re-apply the raw image with the current integer params (nearest
     // neighbour, rounded translation — the pixel-art rules live in align.cpp).
     // 用当前整数参数重贴原图（最近邻、平移取整 —— 像素风规则在 align.cpp 里）。
-    editor.ensureCanvas(editor.view);
-    editor.pixels[editor.view] =
+    editor.ensureCanvas(editor.piece, editor.view);
+    editor.pixels[editor.piece][editor.view] =
         fb::applyAlign(importRaw, importAlign, editor.canvas);
-    editor.touched[editor.view] = true;
+    editor.touched[editor.piece][editor.view] = true;
     ++revision;
 }
 

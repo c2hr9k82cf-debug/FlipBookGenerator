@@ -16,6 +16,7 @@
 // 推断。无图层、无魔棒、无对称画笔、无任何子像素。
 #pragma once
 
+#include "core/regions.h"
 #include "core/template_spec.h"
 
 #include <opencv2/core.hpp>
@@ -27,39 +28,52 @@ namespace fb {
 
 struct PartEditor {
     static constexpr int FRONT = 0, SIDE = 1, BACK = 2;
+    // Piece tabs (v0.12.0 plan D2): MAIN = "X.png" (front piece / top layer),
+    // BACKP = "X_b.png" (back-layer piece — for hair the back-of-head piece).
+    // 片 tab（v0.12.0 计划 D2）：MAIN = X.png（前发片/盖顶层），BACKP = X_b.png
+    // （垫底片 —— hair 即后发片）。
+    static constexpr int MAIN = 0, BACKP = 1;
 
     cv::Size canvas{32, 32};
     std::string slot = "hair";        // current slot / 当前槽
     std::string itemName = "untitled";
     int view = FRONT;                 // active view tab / 当前视图 tab
+    int piece = MAIN;                 // active piece tab / 当前片 tab
 
-    cv::Mat pixels[3];   // BGRA work images; empty = view not drawn yet
-                         // BGRA 工作图；空 = 该视图还没画
-    bool touched[3] = {false, false, false};   // modified since load / 载入后改过
+    // BGRA work images [piece][view]; empty = not drawn yet.
+    // BGRA 工作图 [片][视图]；空 = 还没画。
+    cv::Mat pixels[2][3];
+    bool touched[2][3] = {{false, false, false}, {false, false, false}};
 
-    // Exactly one undo step (P3 scope). / 恰好一步撤销（P3 范围）。
-    cv::Mat undoSnap[3];
+    // Exactly one undo step (P3 scope) — snapshots BOTH pieces.
+    // 恰好一步撤销（P3 范围）—— 快照含两片。
+    cv::Mat undoSnap[2][3];
     bool hasUndo = false;
 
     // Per-slot draft stash (v0.11.1 bug B7): the work canvas belongs to ONE
-    // slot. Switching slots stashes the whole view set here and restores the
-    // target slot's set, so one slot's pixels never leak into another's.
-    // 按槽草稿暂存（v0.11.1 bug B7）：工作画布属于唯一槽位。切槽时整套视图存进
-    // 这里、目标槽的整套恢复回去 —— 一个槽的像素绝不漏进另一个槽。
+    // slot. Switching slots stashes the whole [piece][view] set here and
+    // restores the target slot's set, so one slot's pixels never leak into
+    // another's.
+    // 按槽草稿暂存（v0.11.1 bug B7）：工作画布属于唯一槽位。切槽时整套
+    // [片][视图] 存进这里、目标槽的整套恢复回去 —— 一个槽的像素绝不漏进另一个槽。
     struct Draft {
-        cv::Mat pixels[3];
-        bool touched[3] = {false, false, false};
+        cv::Mat pixels[2][3];
+        bool touched[2][3] = {{false, false, false}, {false, false, false}};
         std::string itemName = "untitled";
+        int piece = MAIN;
     };
     std::map<std::string, Draft> drafts;   // every slot but the active one /
                                            // 除当前槽外的各槽
 
-    bool viewReady(int v) const;   // drawn or loaded / 画过或载入过
+    bool viewReady(int p, int v) const;   // drawn or loaded / 画过或载入过
+    bool viewReady(int v) const { return viewReady(piece, v); }
     // Create the view's canvas on first edit. / 首次编辑时创建该视图画布。
-    void ensureCanvas(int v);
+    void ensureCanvas(int p, int v);
     // Start a fresh empty item. / 开一个全新空部件。
     void blank(cv::Size sz);
     void setView(int v);
+    // Switch the active piece tab. / 切换当前片。
+    void setPiece(int p);
     // Switch slots with draft stash/restore — never leaks pixels across
     // slots; the single undo step dies with the old canvas.
     // 切槽并暂存/恢复草稿 —— 像素绝不跨槽泄漏；单步撤销随旧画布一起作废。
@@ -92,15 +106,21 @@ struct PartEditor {
 
 // Save the editor item as a library folder:
 //   <libraryRoot>/<slot>/<itemName>/{front.png,side.png[,back.png],item.json}
-// back.png is written only when the back view is drawn (then item.json says
-// back:"file"); otherwise item.json says back:"auto" — matching the loader's
-// no-ambiguity rule.
+// plus the optional back-layer pieces {front_b.png,side_b.png[,back_b.png]}
+// (v0.12.0). back.png is written only when the back view is drawn (then
+// item.json says back:"file"); otherwise item.json says back:"auto" —
+// matching the loader's no-ambiguity rule. back_b.png needs back.png for
+// the same reason. When `boxes` is non-null, EVERY piece must paint inside
+// its slot's region box (the drawing contract) or the save is refused with
+// the out-of-box pixel count.
 // 把编辑器部件存成库文件夹：
 //   <libraryRoot>/<slot>/<itemName>/{front.png,side.png[,back.png],item.json}
-// 画了背面才写 back.png（item.json 为 back:"file"）；否则 item.json 为
-// back:"auto" —— 与加载器的无歧义规则一致。
+// 外加可选垫底片 {front_b.png,side_b.png[,back_b.png]}（v0.12.0）。画了背面才
+// 写 back.png（item.json 为 back:"file"）；否则 item.json 为 back:"auto" ——
+// 与加载器的无歧义规则一致。back_b.png 同理需要 back.png。boxes 非空时，每一片
+// 都必须画在本槽轮廓框内（绘制契约），否则拒绝保存并报出越界像素数。
 bool saveEditorItem(const PartEditor& ed, const std::string& libraryRoot,
-                    std::string& err);
+                    const RegionBoxes* boxes, std::string& err);
 
 // Load a library item folder into the editor (all views it has).
 // 把库物品文件夹读进编辑器（有啥视图读啥）。
