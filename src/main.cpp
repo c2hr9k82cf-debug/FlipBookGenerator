@@ -22,6 +22,7 @@
 #include "core/parts.h"
 #include "core/parts_library.h"
 #include "core/regions.h"
+#include "core/replace.h"
 #include "core/template_spec.h"
 #include "spritesheet.h"
 #include "extractor.h"
@@ -34,6 +35,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -146,6 +148,16 @@ void printCliUsage() {
         "      caught. / 轮廓框闸门（v0.12.0）：绘制契约 —— 区域 JSON 必须自洽，\n"
         "      参考件必须坐在本槽框内，合成的框外像素必须被抓住。\n"
         "\n"
+        "  flipbook --replace-classify-gate [--templates DIR] [--assets DIR]\n"
+        "      [--chips DIR]\n"
+        "      Replace-classify gate (v0.13.0): the core region classifier\n"
+        "      must reproduce the committed tool artefacts — splitting the\n"
+        "      reference views gives the ref_* sprites byte-exact, classifying\n"
+        "      all 24 chip frames gives the chibi_regions.json boxes.\n"
+        "      替换分类闸门（v0.13.0）：core 的区域分类器必须复现工具的提交产物\n"
+        "      —— 拆参考视图得 ref_* 精灵逐字节，分类 24 张芯片帧得\n"
+        "      chibi_regions.json 的框。\n"
+        "\n"
         "  flipbook --compose-layers-gate [--templates DIR]\n"
         "      D3 layering gate (v0.12.0): the back piece beds down under the\n"
         "      face, the front piece covers it, bare skin defends the arms,\n"
@@ -257,6 +269,7 @@ struct CliArgs {
     bool regionGate         = false;   // v0.12.0 drawing contract / 绘制契约
     bool editorBoxGate      = false;   // v0.12.0 save-side contract / 保存侧契约
     bool composeLayersGate  = false;   // v0.12.0 D3 layering / D3 层序
+    bool replaceClassifyGate = false;  // v0.13.0 region classifier / 区域分类器
 
     // Composer (v0.10.1) / 合成器（v0.10.1）
     std::string library = "assets/parts_library";
@@ -329,6 +342,8 @@ bool parseArgs(int argc, char** argv, CliArgs& a, std::string& err) {
             a.fillGate = true;
         } else if (s == "--region-gate") {
             a.regionGate = true;
+        } else if (s == "--replace-classify-gate") {
+            a.replaceClassifyGate = true;
         } else if (s == "--editor-box-gate") {
             a.editorBoxGate = true;
         } else if (s == "--compose-layers-gate") {
@@ -1310,6 +1325,199 @@ int runRegionGate(const CliArgs& a) {
         return 1;
     }
     std::cout << "region boxes: all checks passed   OK\n";
+    return 0;
+}
+
+// Replace-classify gate (v0.13.0): the core region classifier must agree with
+// the artefacts the Python tools committed. Splitting the reference views
+// reproduces the ref_* sprites byte-exact (both lookup paths: raw role
+// colours and an extracted recolour map), classifying all 24 chip frames
+// reproduces the chibi_regions.json boxes (frame coords), and the anim loader
+// sees six flipbooks whose frame counts match the chip set.
+// 替换分类闸门（v0.13.0）：core 的区域分类器必须与 Python 工具的提交产物一致。
+// 拆参考视图逐字节复现 ref_* 精灵（两条查表路径：原始角色色 + 提取的换色
+// map）；分类 24 张芯片帧复现 chibi_regions.json 的框（帧坐标）；anim 加载器
+// 看到六本翻页书且帧数与芯片集一致。
+int runReplaceClassifyGate(const CliArgs& a) {
+    std::string err;
+    int failures = 0;
+
+    fb::TemplateSpec spec;
+    if (!fb::loadTemplateSpec(a.templates + "/chibi_standard.json", spec, err)) {
+        std::cout << "loadTemplateSpec: " << err << "   FAIL\n";
+        return 1;
+    }
+    fb::SlotTables tables;
+    if (!fb::buildSlotTables(spec, tables, err)) {
+        std::cout << "buildSlotTables: " << err << "   FAIL\n";
+        return 1;
+    }
+    std::cout << "buildSlotTables: " << tables.colourToRole.size()
+              << " role colours, row bands global across views   OK\n";
+
+    std::map<std::string, std::vector<int>> bodyTop;
+    if (!fb::loadAnimBodyTop(a.templates + "/anim_reference.json", bodyTop, err)) {
+        std::cout << "loadAnimBodyTop: " << err << "   FAIL\n";
+        return 1;
+    }
+    std::cout << "loadAnimBodyTop:";
+    for (const auto& kv : bodyTop) {
+        std::cout << " " << kv.first << "=" << kv.second.size();
+        for (int bty : kv.second) {
+            if (bty < 1 || bty > 3) {
+                std::cout << "\n  " << kv.first << ": body_top_y " << bty
+                          << " outside 1..3   FAIL";
+                ++failures;
+            }
+        }
+    }
+    std::cout << (failures ? "\n" : "   OK\n");
+
+    fb::ChipSet chips;
+    if (!fb::loadChipSet(a.chips, chips, err)) {
+        std::cout << "loadChipSet: " << err << "   FAIL\n";
+        return 1;
+    }
+    for (const auto& kv : bodyTop) {
+        const fb::MotionChips* mc = chips.find(kv.first);
+        if (!mc || (int)kv.second.size() != mc->frameCount) {
+            std::cout << "chips vs anim: " << kv.first
+                      << ": frame count mismatch   FAIL\n";
+            ++failures;
+        }
+    }
+    if (!failures)
+        std::cout << "chip frame counts match the anim series   OK\n";
+
+    // A: reference-view split == ref_* sprites, byte-exact, both lookup paths.
+    // A：参考视图拆分 == ref_* 精灵，逐字节，两条查表路径都过。
+    struct ViewRef { const char* view; const char* png; };
+    const ViewRef kViews[3] = {
+        {"front", "character_32.png"},
+        {"side", "character_32_side.png"},
+        {"back", "character_32_back.png"},
+    };
+    const std::vector<std::string>& names = fb::slotNames();
+    for (const ViewRef& vr : kViews) {
+        cv::Mat view = cv::imread(a.assets + "/" + vr.png, cv::IMREAD_UNCHANGED);
+        if (view.empty() || view.type() != CV_8UC4 || view.rows != 32 ||
+            view.cols != 32) {
+            std::cout << "A " << vr.view << ": cannot read " << vr.png << "   FAIL\n";
+            ++failures;
+            continue;
+        }
+        for (int variant = 0; variant < 2; ++variant) {
+            fb::PaletteMap map;
+            if (variant == 1 && !fb::extractPaletteMap(view, view, map, err)) {
+                std::cout << "A " << vr.view << ": extractPaletteMap " << err
+                          << "   FAIL\n";
+                ++failures;
+                continue;
+            }
+            fb::SlotSplit sp = fb::splitViewBySlot(view, map, tables);
+            // Tiling: every opaque pixel gets exactly one slot (disjoint by
+            // construction — one slot map). / 铺满：每个不透明像素恰得一槽
+            // （构造上互斥 —— 单张槽图）。
+            int opaque = 0, inSprites = 0;
+            for (int y = 0; y < 32; ++y)
+                for (int x = 0; x < 32; ++x)
+                    if (view.at<cv::Vec4b>(y, x)[3]) ++opaque;
+            for (const cv::Mat& s : sp.sprites)
+                for (int y = 0; y < 32; ++y)
+                    for (int x = 0; x < 32; ++x)
+                        if (s.at<cv::Vec4b>(y, x)[3]) ++inSprites;
+            if (sp.unassigned != 0 || inSprites != opaque) {
+                std::cout << "A " << vr.view << " v" << variant
+                          << ": tiling broken (unassigned " << sp.unassigned
+                          << ", sprites " << inSprites << " vs alpha " << opaque
+                          << ")   FAIL\n";
+                ++failures;
+            }
+            for (int si = 0; si < 6; ++si) {
+                const std::string p = a.assets + "/parts_library/" +
+                                      names[(size_t)si] + "/ref_" +
+                                      names[(size_t)si] + "/" + vr.view + ".png";
+                cv::Mat ref = cv::imread(p, cv::IMREAD_UNCHANGED);
+                int diffs = 0;
+                if (ref.empty() || ref.rows != 32 || ref.cols != 32) {
+                    diffs = -1;
+                } else {
+                    for (int y = 0; y < 32; ++y)
+                        for (int x = 0; x < 32; ++x)
+                            if (ref.at<cv::Vec4b>(y, x) !=
+                                sp.sprites[(size_t)si].at<cv::Vec4b>(y, x))
+                                ++diffs;
+                }
+                if (diffs != 0) {
+                    std::cout << "A " << vr.view << "/" << names[(size_t)si]
+                              << " v" << variant << ": vs ref_* "
+                              << (diffs < 0 ? std::string("cannot read")
+                                            : std::to_string(diffs) + " px differ")
+                              << "   FAIL\n";
+                    ++failures;
+                }
+            }
+        }
+    }
+    if (!failures)
+        std::cout << "A: reference splits == ref_* sprites (18 x 2 paths)   OK\n";
+
+    // B: chip-frame classify union == chibi_regions.json masks (frame coords,
+    // exactly as tools/extract_regions.py records them).
+    // B：芯片帧分类并集 == chibi_regions.json 掩码（帧坐标，与
+    // tools/extract_regions.py 的记录方式一致）。
+    fb::RegionBoxes boxes;
+    if (!fb::loadRegions(a.templates + "/chibi_regions.json", boxes, err)) {
+        std::cout << "loadRegions: " << err << "   FAIL\n";
+        return 1;
+    }
+    std::map<std::string, std::set<std::pair<int, int>>> unionCells;
+    int framesSeen = 0;
+    for (const auto& kv : bodyTop) {
+        const fb::MotionChips* mc = chips.find(kv.first);
+        if (!mc) continue;
+        for (int i = 0; i < (int)mc->frames.size() && i < (int)kv.second.size(); ++i) {
+            const cv::Mat slotMap =
+                fb::classifyFrame(mc->frames[(size_t)i], kv.second[(size_t)i] - 2,
+                                  tables);
+            for (int y = 0; y < slotMap.rows; ++y)
+                for (int x = 0; x < slotMap.cols; ++x) {
+                    const signed char s = slotMap.at<signed char>(y, x);
+                    if (s < 0) continue;
+                    unionCells[names[(size_t)s]].insert({x, y});
+                }
+            ++framesSeen;
+        }
+    }
+    std::cout << "B: " << framesSeen << " frames classified\n";
+    if (framesSeen != 24) {
+        std::cout << "  expected 24 frames   FAIL\n";
+        ++failures;
+    }
+    for (const std::string& s : names) {
+        int missing = 0, extra = 0;
+        for (int y = 0; y < 32; ++y) {
+            for (int x = 0; x < 32; ++x) {
+                const bool inMask = boxes.contains(s, x, y);
+                const bool inUnion = unionCells[s].count({x, y}) != 0;
+                if (inMask && !inUnion) ++missing;
+                if (!inMask && inUnion) ++extra;
+            }
+        }
+        if (missing || extra) {
+            std::cout << "  " << s << ": mask vs union missing " << missing
+                      << " extra " << extra << "   FAIL\n";
+            ++failures;
+        }
+    }
+    if (!failures)
+        std::cout << "B: union == chibi_regions.json masks (6 slots)   OK\n";
+
+    if (failures) {
+        std::cout << "replace classify: " << failures << " failure(s)   FAIL\n";
+        return 1;
+    }
+    std::cout << "replace classify: all checks passed   OK\n";
     return 0;
 }
 
@@ -3337,6 +3545,7 @@ int runCli(int argc, char** argv) {
     if (a.backinferGate)      return runBackinferGate(a);
     if (a.fillGate)           return runFillGate(a);
     if (a.regionGate)         return runRegionGate(a);
+    if (a.replaceClassifyGate) return runReplaceClassifyGate(a);
     if (a.editorBoxGate)      return runEditorBoxGate(a);
     if (a.composeLayersGate)  return runComposeLayersGate(a);
     if (a.compose)     return runCompose(a);

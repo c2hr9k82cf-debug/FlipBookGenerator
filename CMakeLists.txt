@@ -53,6 +53,7 @@ add_library(flipbook_core STATIC
     src/core/align.cpp
     src/core/json_min.cpp
     src/core/regions.cpp
+    src/core/replace.cpp
     src/core/template_spec.cpp
     src/core/backinfer.cpp
     src/core/part_editor.cpp
@@ -275,6 +276,20 @@ add_test(
     NAME editor_box
     COMMAND flipbook --editor-box-gate
             --templates ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+# Replace-classify gate (v0.13.0): the core region classifier reproduces the
+# committed tool artefacts — reference splits == ref_* sprites byte-exact,
+# 24-frame classify union == chibi_regions.json masks, anim series sane.
+# 替换分类闸门（v0.13.0）：core 的区域分类器复现工具提交产物 —— 参考拆分 ==
+# ref_* 精灵逐字节、24 帧分类并集 == chibi_regions.json 掩码、动画序列自洽。
+add_test(
+    NAME replace_classify
+    COMMAND flipbook --replace-classify-gate
+            --templates ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates
+            --assets ${CMAKE_CURRENT_SOURCE_DIR}/assets
+            --chips ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates/motion_chips
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
