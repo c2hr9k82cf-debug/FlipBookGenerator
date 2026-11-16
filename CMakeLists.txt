@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(FlipBookGenerator VERSION 0.13.1 LANGUAGES CXX)
+project(FlipBookGenerator VERSION 0.14.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -71,6 +71,27 @@ add_executable(flipbook
     src/extractor.cpp
 )
 target_link_libraries(flipbook flipbook_core ${OpenCV_LIBS})
+
+# ---------------------------------------------------------------------------
+# flipbook_server — the web service shell / 网站服务薄壳 (v0.14.0)
+#
+# Thin HTTP shell over flipbook_core: three views uploaded, one four-direction
+# sheet + engine-agnostic metadata out. Same buildFourDirSheet call as the GUI
+# and the CLI (golden invariant by construction), tolerant mode like the GUI.
+# Uses the vendored cpp-httplib (third_party/httplib, MIT) — see docs/WEB_SERVICE.md.
+# flipbook_core 的 HTTP 薄壳：上传三视图，出一张四方向大图 + 引擎无关元数据。
+# 与 GUI/CLI 同一个 buildFourDirSheet 调用（金不变量构造性成立），宽容模式同 GUI。
+# 用 vendored 的 cpp-httplib（third_party/httplib，MIT）—— 见 docs/WEB_SERVICE.md。
+# ---------------------------------------------------------------------------
+option(FLIPBOOK_BUILD_WEB "Build the web service (flipbook_server)" ON)
+if(FLIPBOOK_BUILD_WEB)
+    find_package(Threads REQUIRED)
+    add_executable(flipbook_server src/web/server_main.cpp)
+    target_include_directories(flipbook_server PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/httplib)
+    target_link_libraries(flipbook_server
+        flipbook_core Threads::Threads ${OPENCV_MINIMAL_LIBS})
+endif()
 
 # ---------------------------------------------------------------------------
 # Tests / 测试

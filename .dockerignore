@@ -1,0 +1,7 @@
+# Keep the build context lean / 保持构建上下文精简
+.git
+build
+output
+*.app
+.DS_Store
+**/__pycache__

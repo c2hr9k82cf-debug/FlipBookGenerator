@@ -8,8 +8,8 @@ Turn AI-generated pixel-art character images into flipbook animations, entirely 
 
 ## Current state / 当前状态
 
-**V0.8.3 — the shipped GUI product is "drag 3 views in → one four-direction sheet out" (Tier B reskin pipeline). The roadmap below is the source of truth, not the old feature list.**
-**V0.8.3 —— GUI 产品形态是"拖三视图进 → 出一张四方向大图"（Tier B 换皮管线）。下面的路线图是唯一准绳，旧功能清单不是。**
+**V0.14.0 — shipped surfaces: the desktop `.app` ("drag 3 views in → one four-direction sheet out") and the web service (Docker container, browser upload → sheet + preview). The roadmap below is the source of truth, not the old feature list.**
+**V0.14.0 —— 已交付形态：桌面 `.app`（"拖三视图进 → 出一张四方向大图"）与网站服务（Docker 容器，浏览器上传 → 大图 + 预览）。下面的路线图是唯一准绳，旧功能清单不是。**
 
 | What runs today / 今天能跑 | Status |
 |---|---|
@@ -18,6 +18,7 @@ Turn AI-generated pixel-art character images into flipbook animations, entirely 
 | Grid editor (paint / erase / k-means auto-detect / overview) / 格子编辑器 | ✅ works |
 | **Animation core engine (Phase 1) / 动画核心引擎** | ✅ **works** — 4 presets, reconstruction + detach gates pass |
 | **GUI app + packaged `.app` / GUI 应用 + 打包** | ✅ **works (v0.8.3)** — drag 3 template-aligned views in, one four-direction 192×256 sheet PNG out; `build_app.sh` → double-clickable `.app` |
+| **Web service + Docker image / 网站服务 + Docker 镜像** | ✅ **works (v0.14.0)** — `flipbook_server` (cpp-httplib shell over core), browser upload → sheet + meta + canvas preview; `Dockerfile`, `scripts/deploy_to_vm.sh`, `docs/WEB_SERVICE.md` |
 
 The CLI mode menu in `src/main.cpp` is **temporary**. The GUI product is the
 three-views-in → four-direction-sheet `.app` (`src/ui/`, `build_app.sh`). Do not
@@ -189,6 +190,22 @@ Rejected alternative / 已排除的备选：drop OpenCV entirely (stb_image + ha
 k-means/resize/bbox) for a zero-dependency single binary. Attractive — `cv::resize`
 defaults to bilinear, which is **wrong** for pixel art — but it is a second
 architectural change on top of the GUI migration. Revisit only if bundling proves painful.
+
+### Web service packaging / 网站服务打包 (v0.14.0)
+
+The web service ships as a **Docker image** (see `Dockerfile`): two binaries
+(`flipbook`, `flipbook_server`), `web/` (self-contained frontend — no CDN, the
+box may be offline), `assets/` (536KB). Build on the target machine for a
+native-arch image; `scripts/deploy_to_vm.sh` ships the source and builds there.
+The server is the GUI's tolerant pipeline over HTTP (auto-align + warn + repair);
+`flipbook --fourdir --tolerant` is its CLI twin. Golden invariant extends:
+web output is byte-identical to CLI output. See `docs/WEB_SERVICE.md`.
+网站服务以 **Docker 镜像**交付（见 `Dockerfile`）：两个二进制（`flipbook`、
+`flipbook_server`）、`web/`（自包含前端 —— 不用 CDN，机器可能没外网）、
+`assets/`（536KB）。在目标机上构建得原生架构镜像；`scripts/deploy_to_vm.sh`
+送源码过去构建。服务端是 GUI 宽容管线的 HTTP 化（自动对齐 + 提醒 + 修复）；
+`flipbook --fourdir --tolerant` 是其 CLI 孪生。金不变量延伸：web 输出与 CLI
+输出逐字节一致。详见 `docs/WEB_SERVICE.md`。
 
 ### Skeleton vs. template — how 3 views become 3 flipbooks / 骨架与模板分离
 
@@ -391,6 +408,8 @@ FlipBookGenerator/
 │   ├── utils.h/cpp         # PartDef, PARTS, defaultPivot()
 │   ├── spritesheet.h/cpp   # Mode 1: multi-image sprite sheet + preview
 │   ├── extractor.h/cpp     # Mode 2: grid editor + part extraction
+│   ├── ui/                 # Dear ImGui wizard (GUI product) / ImGui 向导（GUI 产品）
+│   ├── web/                # web service shell (flipbook_server) / 网站服务薄壳
 │   └── core/               # Animation engine, no UI dependency
 │       ├── core.h          # PartTransform/Pose/Keyframe/Animation/Rig
 │       ├── rig.cpp         # load part bundles
@@ -409,11 +428,19 @@ FlipBookGenerator/
 │   │   ├── chibi_standard_pixels.txt # full pixel map (30×14 ASCII art)
 │   │   └── anim_reference.json       # measured leg positions/body offsets/tone swaps
 │   └── character_32.png    # test character (pixel-exact vs reference)
+├── web/
+│   └── index.html          # self-contained frontend (upload + canvas player)
+├── third_party/
+│   └── httplib/httplib.h   # cpp-httplib v0.63.0 (MIT), vendored / 已入库
+├── scripts/
+│   ├── build_image.sh      # local docker build / 本机构建镜像
+│   ├── deploy_to_vm.sh     # ship source + build + run on a Linux box / 送源码到目标机构建运行
+│   └── web_smoke.sh        # web service smoke test / 网站服务冒烟
+├── Dockerfile              # web service image / 网站服务镜像
 └── output/                 # 100% generated, 100% gitignored
 ```
 
-Planned additions / 计划新增：`src/extract/` (algorithms),
-`src/ui/` (ImGui wizard), `third_party/`, `build_app.sh`.
+Planned additions / 计划新增：`src/extract/` (algorithms).
 
 ## Build / 构建
 

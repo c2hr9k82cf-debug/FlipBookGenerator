@@ -231,11 +231,12 @@ void printCliUsage() {
         "      往返一致、坏配方被拒、合成视图走四方向管线出图与参考视图一致（全链）。\n"
         "\n"
         "  flipbook --fourdir --front F.png --side S.png --back B.png\n"
-        "      [--chips DIR] --out DIR\n"
+        "      [--chips DIR] [--templates DIR] --out DIR [--tolerant]\n"
         "      The app pipeline: extract palettes from three template-aligned\n"
         "      views, reskin the chips, write the 8x6 four-direction sheet PNG.\n"
+        "      --tolerant: warn and repair instead of rejecting (GUI / web mode).\n"
         "      app 管线：从三张模板对齐视图提取配色、给芯片换皮、写出 8x6 四方向\n"
-        "      大图 PNG。\n"
+        "      大图 PNG。--tolerant：提醒并修复而非拒绝（GUI / 网站模式）。\n"
         "\n"
         "  flipbook --help\n"
         "\n"
@@ -268,6 +269,10 @@ struct CliArgs {
     std::string kitDir;      // tests/fixtures/test_kit / 混色夹具目录
     bool fourdirGate = false;
     bool fourdir     = false;
+    // --tolerant with --fourdir: warn and repair, don't reject (the GUI's
+    // mode; the web service's CLI twin). / --fourdir 配 --tolerant：提醒并
+    // 修复、不拒绝（GUI 的模式；网站服务的 CLI 孪生）。
+    bool tolerant    = false;
 
     // Alignment diagnostics gate (v0.9.0) / 对齐诊断闸门（v0.9.0）
     std::string alignCase;   // apply | auto | diff
@@ -390,6 +395,8 @@ bool parseArgs(int argc, char** argv, CliArgs& a, std::string& err) {
             a.fixtures = v;
         } else if (s == "--fourdir") {
             a.fourdir = true;
+        } else if (s == "--tolerant") {
+            a.tolerant = true;
         } else if (s == "--front") {
             const char* v = needValue("--front"); if (!v) return false;
             a.frontImg = v;
@@ -4017,7 +4024,9 @@ int runFourdir(const CliArgs& a) {
     }
 
     fb::FourDirResult res;
-    if (!fb::buildFourDirSheet(views[0], views[1], views[2], cs, spec, res, err)) {
+    fb::ExtractStats stats[3];
+    if (!fb::buildFourDirSheet(views[0], views[1], views[2], cs, spec, res, err,
+                               stats, a.tolerant)) {
         std::cerr << "FAIL: " << err << "\n";
         return 1;
     }
@@ -4037,6 +4046,19 @@ int runFourdir(const CliArgs& a) {
               << "Sheet:  " << res.sheet.cols << "x" << res.sheet.rows
               << " (" << fb::SHEET_ROWS << " rows x " << fb::SHEET_COLS << " cols)\n"
               << "Wrote:  " << outPath << "\n";
+    // Tolerant-mode repairs, one line each — the CLI twin of the web service's
+    // warnings array. / 宽容模式修复提示，每视图一行 —— 网站服务 warnings 数组
+    // 的 CLI 孪生。
+    for (int v = 0; v < 3; ++v) {
+        if (stats[v].maskDiffPixels)
+            std::cout << "WARN: mask diff " << stats[v].maskDiffPixels
+                      << " pixel(s) tolerated\n";
+        if (stats[v].colourConflictPixels)
+            std::cout << "WARN: " << stats[v].colourConflictPixels
+                      << " minority pixel(s) repaired to majority";
+        if (!stats[v].warning.empty()) std::cout << " — " << stats[v].warning;
+        if (stats[v].colourConflictPixels) std::cout << "\n";
+    }
     return 0;
 }
 

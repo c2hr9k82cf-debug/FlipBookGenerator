@@ -1,0 +1,313 @@
+<!doctype html>
+<!-- web/index.html — FlipBookGenerator 网页版前端 / web frontend -->
+<!-- Self-contained on purpose: the container may run on an offline LAN box.
+     自包含是有意为之：容器可能跑在无外网的局域网机器上。 -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FlipBookGenerator 网页版</title>
+<style>
+  :root {
+    --bg: #17181c; --panel: #1f2127; --panel2: #262932;
+    --fg: #e9e9ef; --dim: #9aa0ad; --line: #343845;
+    --accent: #6ea8fe; --accent-fg: #10203a;
+    --warn: #f2b46b; --err: #f2777a; --ok: #7ad68f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.6 -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    padding: 0 16px 48px;
+  }
+  header { max-width: 980px; margin: 0 auto; padding: 28px 0 8px; }
+  header h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: .5px; }
+  header p { margin: 0; color: var(--dim); }
+  main { max-width: 980px; margin: 0 auto; }
+  h2 { font-size: 15px; margin: 28px 0 12px; color: var(--dim); font-weight: 600;
+       text-transform: uppercase; letter-spacing: .08em; }
+  .slots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  @media (max-width: 720px) { .slots { grid-template-columns: 1fr; } }
+  .slot {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px; text-align: center; cursor: pointer; transition: border-color .15s;
+  }
+  .slot:hover, .slot.drag { border-color: var(--accent); }
+  .slot .tag { font-size: 13px; color: var(--dim); margin-bottom: 8px; }
+  .slot canvas {
+    width: 128px; height: 128px; image-rendering: pixelated;
+    background:
+      conic-gradient(#2c2f38 0 25%, #23262e 0 50%, #2c2f38 0 75%, #23262e 0) 0 0/16px 16px;
+    border: 1px solid var(--line); border-radius: 6px;
+  }
+  .slot .name { font-size: 12px; color: var(--dim); margin-top: 8px;
+                overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .actions { margin: 20px 0 4px; display: flex; align-items: center; gap: 14px; }
+  button {
+    font: inherit; border: 0; border-radius: 8px; padding: 10px 22px;
+    background: var(--accent); color: var(--accent-fg); font-weight: 600; cursor: pointer;
+  }
+  button:disabled { opacity: .45; cursor: default; }
+  button.ghost { background: var(--panel2); color: var(--fg); border: 1px solid var(--line); }
+  #error { color: var(--err); margin: 10px 0; white-space: pre-wrap; }
+  .warnbox { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+             padding: 12px 16px; margin-bottom: 16px; }
+  .warnbox li { color: var(--warn); margin: 4px 0; }
+  .warnbox ul { margin: 0; padding-left: 20px; }
+  .diffs { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+  .diffs figure { margin: 0; text-align: center; }
+  .diffs img { width: 96px; height: 96px; image-rendering: pixelated;
+               border: 1px solid var(--line); border-radius: 6px;
+               background: conic-gradient(#2c2f38 0 25%, #23262e 0 50%, #2c2f38 0 75%, #23262e 0) 0 0/16px 16px; }
+  .diffs figcaption { font-size: 12px; color: var(--dim); }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+           padding: 18px; display: flex; gap: 22px; flex-wrap: wrap; }
+  #stage { width: 256px; height: 256px; image-rendering: pixelated; border-radius: 8px;
+           background:
+             conic-gradient(#2c2f38 0 25%, #23262e 0 50%, #2c2f38 0 75%, #23262e 0) 0 0/24px 24px;
+           border: 1px solid var(--line); flex: none; }
+  .controls { flex: 1; min-width: 240px; display: flex; flex-direction: column; gap: 12px; }
+  .tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+  .tabs button { background: var(--panel2); color: var(--fg); border: 1px solid var(--line);
+                 padding: 8px 16px; font-weight: 500; }
+  .tabs button.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+  .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; color: var(--dim); }
+  input[type=range] { accent-color: var(--accent); width: 140px; }
+  .downloads a { color: var(--accent); margin-right: 18px; }
+  footer { max-width: 980px; margin: 36px auto 0; color: var(--dim); font-size: 13px; }
+  code { background: var(--panel2); border-radius: 4px; padding: 1px 6px; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>FlipBookGenerator 网页版</h1>
+  <p>三张模板对齐的 32×32 视图（正面 / 侧面 / 背面）进去，一张四方向动画大图出来 —— 全程本地处理。</p>
+</header>
+<main>
+  <h2>① 上传三视图</h2>
+  <div class="slots">
+    <div class="slot" id="slot-front" data-view="front">
+      <div class="tag">正面 FRONT</div><canvas width="32" height="32"></canvas>
+      <div class="name">点击选择或拖入 PNG</div>
+    </div>
+    <div class="slot" id="slot-side" data-view="side">
+      <div class="tag">侧面 SIDE</div><canvas width="32" height="32"></canvas>
+      <div class="name">点击选择或拖入 PNG</div>
+    </div>
+    <div class="slot" id="slot-back" data-view="back">
+      <div class="tag">背面 BACK</div><canvas width="32" height="32"></canvas>
+      <div class="name">点击选择或拖入 PNG</div>
+    </div>
+  </div>
+  <input type="file" id="file-front" accept="image/png" hidden>
+  <input type="file" id="file-side" accept="image/png" hidden>
+  <input type="file" id="file-back" accept="image/png" hidden>
+
+  <div class="actions">
+    <button id="go" disabled>生成动画</button>
+    <span id="busy" style="color:var(--dim)"></span>
+  </div>
+  <div id="error"></div>
+
+  <section id="result" hidden>
+    <h2>② 预览与下载</h2>
+    <div id="warnwrap"></div>
+    <div class="panel">
+      <canvas id="stage" width="256" height="256"></canvas>
+      <div class="controls">
+        <div class="tabs" id="dirs">
+          <button data-dir="down" class="on">向下</button>
+          <button data-dir="up">向上</button>
+          <button data-dir="left">向左</button>
+          <button data-dir="right">向右</button>
+        </div>
+        <div class="tabs" id="kinds">
+          <button data-kind="idle" class="on">待机</button>
+          <button data-kind="walk">行走</button>
+        </div>
+        <div class="row">
+          <button class="ghost" id="play">暂停</button>
+          <label>速度 <input type="range" id="speed" min="0.5" max="2" step="0.25" value="1"></label>
+          <span id="animinfo" style="font-variant-numeric:tabular-nums"></span>
+        </div>
+        <div class="downloads">
+          <a id="dl-sheet" download="fourdir_sheet.png">⬇ 下载大图 sheet.png</a>
+          <a id="dl-meta" download="meta.json">⬇ 下载元数据 meta.json</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+<footer>
+  输出大图布局：8 行 × 6 列 × 32px —— 行序 下待机 / 下行走 / 上待机 / 上行走 / 左待机 / 左行走 / 右待机 / 右行走。
+  待机 2 帧、行走 6 帧；向左行为向右的水平镜像。元数据为引擎无关 JSON，可直接进游戏引擎。
+</footer>
+
+<script>
+'use strict';
+const $ = (s) => document.querySelector(s);
+const state = {
+  files: { front: null, side: null, back: null },
+  meta: null, sheetImg: null,
+  dir: 'down', kind: 'idle',
+  playing: true, speed: 1, animTime: 0, lastT: 0,
+};
+
+// ---- upload slots / 上传槽 ----
+for (const view of ['front', 'side', 'back']) {
+  const slot = $('#slot-' + view);
+  const input = $('#file-' + view);
+  const canvas = slot.querySelector('canvas');
+  slot.addEventListener('click', () => input.click());
+  input.addEventListener('change', () => input.files[0] && takeFile(view, input.files[0]));
+  slot.addEventListener('dragover', (e) => { e.preventDefault(); slot.classList.add('drag'); });
+  slot.addEventListener('dragleave', () => slot.classList.remove('drag'));
+  slot.addEventListener('drop', (e) => {
+    e.preventDefault(); slot.classList.remove('drag');
+    if (e.dataTransfer.files[0]) takeFile(view, e.dataTransfer.files[0]);
+  });
+}
+
+function takeFile(view, file) {
+  if (file.type !== 'image/png' && !file.name.toLowerCase().endsWith('.png')) {
+    showError('只支持 PNG（需带透明通道的像素图）：' + file.name);
+    return;
+  }
+  state.files[view] = file;
+  const slot = $('#slot-' + view);
+  slot.querySelector('.name').textContent = file.name;
+  const img = new Image();
+  img.onload = () => {
+    const ctx = slot.querySelector('canvas').getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, 32, 32);
+    ctx.drawImage(img, 0, 0, 32, 32);   // preview only; server re-reads the file
+    URL.revokeObjectURL(img.src);       // 预览而已，服务端自己读文件
+  };
+  img.src = URL.createObjectURL(file);
+  $('#go').disabled = !(state.files.front && state.files.side && state.files.back);
+  showError('');
+}
+
+function showError(msg) { $('#error').textContent = msg || ''; }
+
+// ---- generate / 生成 ----
+$('#go').addEventListener('click', async () => {
+  const fd = new FormData();
+  fd.append('front', state.files.front);
+  fd.append('side', state.files.side);
+  fd.append('back', state.files.back);
+  $('#go').disabled = true;
+  $('#busy').textContent = '处理中…';
+  showError('');
+  try {
+    const res = await fetch('/api/convert', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    showResult(data);
+  } catch (e) {
+    showError('生成失败：' + e.message);
+  } finally {
+    $('#go').disabled = !(state.files.front && state.files.side && state.files.back);
+    $('#busy').textContent = '';
+  }
+});
+
+function showResult(data) {
+  state.meta = data.meta;
+  $('#result').hidden = false;
+  $('#dl-sheet').href = data.sheet_url;
+  $('#dl-meta').href = data.meta_url;
+
+  // warnings + diff overlays / 警告 + 差异标注图
+  const wrap = $('#warnwrap');
+  wrap.innerHTML = '';
+  const warns = data.warnings || [];
+  const diffs = data.diff_urls || {};
+  if (warns.length || Object.keys(diffs).length) {
+    const box = document.createElement('div');
+    box.className = 'warnbox';
+    const ul = document.createElement('ul');
+    for (const w of warns) {
+      const li = document.createElement('li');
+      li.textContent = w;
+      ul.appendChild(li);
+    }
+    box.appendChild(ul);
+    const figs = document.createElement('div');
+    figs.className = 'diffs';
+    for (const [view, url] of Object.entries(diffs)) {
+      const fig = document.createElement('figure');
+      const img = document.createElement('img');
+      img.src = url;
+      const cap = document.createElement('figcaption');
+      cap.textContent = { front: '正面差异', side: '侧面差异', back: '背面差异' }[view] || view;
+      fig.appendChild(img); fig.appendChild(cap);
+      figs.appendChild(fig);
+    }
+    box.appendChild(figs);
+    wrap.appendChild(box);
+  }
+
+  const img = new Image();
+  img.onload = () => { state.sheetImg = img; state.animTime = 0; state.lastT = 0; };
+  img.src = data.sheet_url;
+  $('#play').textContent = '暂停';
+  state.playing = true;
+  requestAnimationFrame(tick);
+}
+
+// ---- player / 播放器 ----
+const DIR_ROW = { down: 0, up: 1, left: 2, right: 3 };
+function currentAnim() {
+  const name = state.dir + '_' + state.kind;
+  return state.meta.animations.find((a) => a.name === name);
+}
+
+function tick(t) {
+  if (!state.sheetImg) { requestAnimationFrame(tick); return; }
+  if (!state.lastT) state.lastT = t;
+  const dt = Math.min((t - state.lastT) / 1000, 0.25);
+  state.lastT = t;
+  const anim = currentAnim();
+  if (!anim) { requestAnimationFrame(tick); return; }
+  if (state.playing) state.animTime += dt * state.speed;
+
+  const frame = Math.floor(state.animTime * anim.fps) % anim.frames;
+  const row = anim.row;
+  const stage = $('#stage');
+  const ctx = stage.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0, 0, stage.width, stage.height);
+  ctx.drawImage(state.sheetImg,
+                frame * 32, row * 32, 32, 32,
+                0, 0, stage.width, stage.height);
+  $('#animinfo').textContent =
+    anim.name + '  帧 ' + (frame + 1) + '/' + anim.frames + '  ' + anim.fps + 'fps';
+  requestAnimationFrame(tick);
+}
+
+for (const btn of document.querySelectorAll('#dirs button')) {
+  btn.addEventListener('click', () => {
+    for (const b of document.querySelectorAll('#dirs button')) b.classList.remove('on');
+    btn.classList.add('on');
+    state.dir = btn.dataset.dir;
+    state.animTime = 0;
+  });
+}
+for (const btn of document.querySelectorAll('#kinds button')) {
+  btn.addEventListener('click', () => {
+    for (const b of document.querySelectorAll('#kinds button')) b.classList.remove('on');
+    btn.classList.add('on');
+    state.kind = btn.dataset.kind;
+    state.animTime = 0;
+  });
+}
+$('#play').addEventListener('click', () => {
+  state.playing = !state.playing;
+  $('#play').textContent = state.playing ? '暂停' : '播放';
+});
+$('#speed').addEventListener('input', (e) => { state.speed = parseFloat(e.target.value); });
+</script>
+</body>
+</html>
