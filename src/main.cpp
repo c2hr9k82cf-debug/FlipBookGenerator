@@ -146,6 +146,13 @@ void printCliUsage() {
         "      caught. / 轮廓框闸门（v0.12.0）：绘制契约 —— 区域 JSON 必须自洽，\n"
         "      参考件必须坐在本槽框内，合成的框外像素必须被抓住。\n"
         "\n"
+        "  flipbook --compose-layers-gate [--templates DIR]\n"
+        "      D3 layering gate (v0.12.0): the back piece beds down under the\n"
+        "      face, the front piece covers it, bare skin defends the arms,\n"
+        "      the back view crosses the pieces (mirror rules), single-piece\n"
+        "      items stamp twice. / D3 层序闸门（v0.12.0）：后发垫底、前发盖脸、\n"
+        "      裸肤护臂、背面两片交叉（镜像规则）、单片件贴两次。\n"
+        "\n"
         "  flipbook --parts-library-gate\n"
         "      Parts library gate (v0.9.1): load a synthesised library, then\n"
         "      verify every known bad shape is refused (missing files, bad json,\n"
@@ -247,6 +254,7 @@ struct CliArgs {
     bool backinferGate      = false;
     bool fillGate           = false;
     bool regionGate         = false;   // v0.12.0 drawing contract / 绘制契约
+    bool composeLayersGate  = false;   // v0.12.0 D3 layering / D3 层序
 
     // Composer (v0.10.1) / 合成器（v0.10.1）
     std::string library = "assets/parts_library";
@@ -319,6 +327,8 @@ bool parseArgs(int argc, char** argv, CliArgs& a, std::string& err) {
             a.fillGate = true;
         } else if (s == "--region-gate") {
             a.regionGate = true;
+        } else if (s == "--compose-layers-gate") {
+            a.composeLayersGate = true;
         } else if (s == "--compose") {
             a.compose = true;
         } else if (s == "--compose-gate") {
@@ -2193,44 +2203,79 @@ int runComposeGate(const CliArgs& a) {
         }
     }
 
-    // ---- 3. back:"auto" == per-item inference ----
-    // ---- 3. back:"auto" == 逐物品推断 ----
+    // ---- 3. back:"auto": hair pieces cross-mirror (plan D3 — the front
+    //         piece's mirror beds down, the back piece's mirror covers);
+    //         every other slot keeps the per-item inference contract ----
+    // ---- 3. back:"auto"：发片交叉镜像（计划 D3 —— 前发镜像垫底、后发镜像
+    //         盖顶）；其余槽保持逐物品推断契约 ----
     {
-        cv::Mat inferred;
-        fb::LibraryItem* hair = nullptr;
-        fb::PartsLibrary autoLib = lib;
-        for (auto& it : autoLib.items)
-            if (it.slot == "hair" && it.name == "ref_hair") hair = &it;
-        if (!hair) {
-            std::cout << "  back auto: ref_hair missing   FAIL\n";
+        const fb::LibraryItem* hair = lib.find("hair", "ref_hair");
+        const fb::LibraryItem* top  = lib.find("top", "ref_top");
+        if (!hair || !top) {
+            std::cout << "  back auto: ref_hair / ref_top missing   FAIL\n";
             ++failures;
         } else {
-            inferred = fb::inferBackView(hair->views[0], hair->views[1], spec, err);
-            if (inferred.empty() || !sameAlpha(inferred, hair->views[0])) {
+            // hair: pure horizontal mirror of the front piece. ref_hair is
+            // single-piece, so the mirror stamps twice (== the mirror itself).
+            // hair：前发片纯水平镜像。ref_hair 是单片件，镜像贴两次
+            // （== 镜像本身）。
+            cv::Mat flipFront;
+            cv::flip(hair->views[0], flipFront, 1);
+            {
+                fb::PartsLibrary hairLib = lib;
+                for (auto& it : hairLib.items)
+                    if (it.slot == "hair" && it.name == "ref_hair") {
+                        it.backMode = "auto";
+                        it.views[2] = cv::Mat();  // no hand-drawn back / 无手绘背面
+                    }
+                fb::ComposeRecipe hairOnly;
+                hairOnly.templateName = ref.templateName;
+                hairOnly.items["hair"] = "ref_hair";
+                cv::Mat outH[3];
+                if (!fb::composeThreeViews(hairOnly, hairLib, spec, outH, err) ||
+                    !sameMat(outH[2], flipFront)) {
+                    std::cout << "  back auto: hair back != pure mirror of "
+                                 "the front piece   FAIL\n";
+                    ++failures;
+                } else {
+                    std::cout << "  back auto: hair pieces cross-mirror "
+                                 "exactly (plan D3)   OK\n";
+                }
+            }
+
+            // top: unchanged contract — compose(auto) == inference fed as a
+            // file sprite, alpha invariant.
+            // top：契约不变 —— compose(auto) == 推断当文件喂，alpha 不变量。
+            cv::Mat inferred =
+                fb::inferBackView(top->views[0], top->views[1], spec, err);
+            if (inferred.empty() || !sameAlpha(inferred, top->views[0])) {
                 std::cout << "  back auto: inference broke the alpha invariant"
                              "   FAIL\n";
                 ++failures;
-            }
-            hair->backMode = "auto";
-            hair->views[2] = cv::Mat();   // no hand-drawn back / 无手绘背面
-            cv::Mat outA[3], outB[3];
-            const bool okA = fb::composeThreeViews(ref, autoLib, spec, outA, err);
-            fb::PartsLibrary fileLib = lib;
-            for (auto& it : fileLib.items)
-                if (it.slot == "hair" && it.name == "ref_hair")
-                    it.views[2] = inferred;   // inference fed as a file sprite
-            const bool okB = fb::composeThreeViews(ref, fileLib, spec, outB, err);
-            if (!okA || !okB || !sameMat(outA[2], outB[2])) {
-                std::cout << "  back auto: compose(auto) != compose(inference"
-                             " as file)   FAIL\n";
-                ++failures;
-            } else if (sameMat(outA[2], composed[2])) {
-                std::cout << "  back auto: output identical to hand-drawn — "
-                             "inference not actually used   FAIL\n";
-                ++failures;
             } else {
-                std::cout << "  back auto: per-item inference, alpha invariant"
-                             "   OK\n";
+                fb::PartsLibrary autoLib = lib;
+                for (auto& it : autoLib.items)
+                    if (it.slot == "top" && it.name == "ref_top") {
+                        it.backMode = "auto";
+                        it.views[2] = cv::Mat();
+                    }
+                cv::Mat outA[3], outB[3];
+                const bool okA =
+                    fb::composeThreeViews(ref, autoLib, spec, outA, err);
+                fb::PartsLibrary fileLib = lib;
+                for (auto& it : fileLib.items)
+                    if (it.slot == "top" && it.name == "ref_top")
+                        it.views[2] = inferred;  // inference as a file sprite
+                const bool okB =
+                    fb::composeThreeViews(ref, fileLib, spec, outB, err);
+                if (!okA || !okB || !sameMat(outA[2], outB[2])) {
+                    std::cout << "  back auto: compose(auto) != compose(inference"
+                                 " as file)   FAIL\n";
+                    ++failures;
+                } else {
+                    std::cout << "  back auto: non-hair per-item inference, "
+                                 "alpha invariant   OK\n";
+                }
             }
         }
     }
@@ -2377,6 +2422,182 @@ int runComposeGate(const CliArgs& a) {
     }
 
     std::cout << (failures ? "COMPOSE GATE FAIL\n" : "COMPOSE GATE OK\n");
+    return failures ? 1 : 0;
+}
+
+// --compose-layers-gate: the D3 layering order asserted on synthetic items
+// (v0.12.0). The back-layer piece beds down under the face; the front piece
+// covers the face; the bare-skin body defends the arms (a stray shirt must
+// not win); on the back view the two pieces CROSS — the front piece's
+// mirror beds down and the back piece's mirror covers; a single-piece item
+// stamps twice and keeps its cells.
+// --compose-layers-gate：用合成件断言 D3 层序（v0.12.0）。垫底片垫在脸下；
+// 前发片盖脸；裸肤 body 护臂（越界上衣不得胜出）；背面两片【交叉】—— 前发
+// 镜像垫底、后发镜像盖顶；单片件贴两次仍守住自己的格子。
+int runComposeLayersGate(const CliArgs& a) {
+    namespace fs = std::filesystem;
+    int failures = 0;
+    std::string err;
+
+    fb::TemplateSpec spec;
+    if (!fb::loadTemplateSpec(a.templates + "/chibi_standard.json", spec, err)) {
+        std::cout << "template load FAILED: " << err << "   FAIL\n";
+        return 1;
+    }
+
+    const fs::path root =
+        fs::temp_directory_path() / "flipbook_compose_layers_gate";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+
+    const cv::Vec4b colA(10, 20, 30, 255);    // front hair / 前发
+    const cv::Vec4b colB(40, 50, 60, 255);    // back hair / 后发
+    const cv::Vec4b colC(70, 80, 90, 255);    // face / 脸
+    const cv::Vec4b colD(100, 110, 120, 255); // top / 上衣
+    const cv::Vec4b colE(130, 140, 150, 255); // bare skin / 裸肤
+    const cv::Vec4b colF(160, 170, 180, 255); // single-piece hair / 单片发
+
+    auto writeSprite = [](const fs::path& p,
+                          std::initializer_list<std::pair<cv::Point, cv::Vec4b>> px) {
+        cv::Mat img(32, 32, CV_8UC4, cv::Scalar(0, 0, 0, 0));
+        for (const auto& e : px) img.at<cv::Vec4b>(e.first.y, e.first.x) = e.second;
+        cv::imwrite(p.string(), img);
+    };
+    auto mkItem = [&](const char* slot, const char* name) {
+        const fs::path d = root / slot / name;
+        fs::create_directories(d);
+        std::ofstream f(d / "item.json");
+        f << "{\"name\": \"" << name << "\", \"slot\": \"" << slot
+          << "\", \"back\": \"auto\", \"silhouette\": \"template\"}\n";
+        return d;
+    };
+
+    // two_piece hair: the front piece paints A, the back piece paints B.
+    // (16,7) is painted by BOTH pieces — whoever is on top must win it.
+    // two_piece hair：前发画 A，后发画 B。(16,7) 两片都画 —— 盖顶者必须赢。
+    const fs::path hd = mkItem("hair", "two_piece");
+    writeSprite(hd / "front.png", {{{13, 6}, colA},
+                                   {{18, 6}, colA},
+                                   {{16, 7}, colA}});
+    writeSprite(hd / "front_b.png", {{{11, 7}, colB},
+                                     {{13, 10}, colB},
+                                     {{18, 10}, colB},
+                                     {{16, 7}, colB}});
+    writeSprite(hd / "side.png", {});
+    writeSprite(hd / "side_b.png", {});
+
+    const fs::path fd = mkItem("face", "face_item");
+    writeSprite(fd / "front.png", {{{13, 6}, colC}, {{13, 10}, colC}});
+    writeSprite(fd / "side.png", {});
+
+    const fs::path td = mkItem("top", "top_item");
+    writeSprite(td / "front.png", {{{12, 15}, colD}});
+    writeSprite(td / "side.png", {});
+
+    const fs::path bd = mkItem("body", "body_item");
+    writeSprite(bd / "front.png", {{{12, 15}, colE}});
+    writeSprite(bd / "side.png", {});
+
+    const fs::path sd = mkItem("hair", "single");
+    writeSprite(sd / "front.png", {{{15, 6}, colF}});
+    writeSprite(sd / "side.png", {});
+
+    fb::PartsLibrary lib;
+    if (!fb::loadPartsLibrary(root.string(), spec.size, lib, err)) {
+        std::cout << "library load FAILED: " << err << "   FAIL\n";
+        return 1;
+    }
+
+    auto checkPx = [&](const cv::Mat& img, int x, int y, const cv::Vec4b& want,
+                       const char* what) {
+        const cv::Vec4b got = img.at<cv::Vec4b>(y, x);
+        if (got == want) {
+            std::cout << "  " << what << "   OK\n";
+        } else {
+            std::cout << "  " << what << ": (" << x << "," << y << ") got ("
+                      << (int)got[0] << "," << (int)got[1] << "," << (int)got[2]
+                      << "," << (int)got[3] << "), want (" << (int)want[0] << ","
+                      << (int)want[1] << "," << (int)want[2] << "," << (int)want[3]
+                      << ")   FAIL\n";
+            ++failures;
+        }
+    };
+
+    // ---- front view: the four D3 relations / 正面：D3 四条关系 ----
+    {
+        fb::ComposeRecipe rec;
+        rec.templateName = spec.name;
+        rec.items["hair"] = "two_piece";
+        rec.items["face"] = "face_item";
+        rec.items["top"] = "top_item";
+        rec.items["body"] = "body_item";
+        cv::Mat out[3];
+        if (!fb::composeThreeViews(rec, lib, spec, out, err)) {
+            std::cout << "  front: compose FAILED: " << err << "   FAIL\n";
+            ++failures;
+        } else {
+            checkPx(out[0], 13, 6, colA,
+                    "front piece covers the face (hair 50 > face 30)");
+            checkPx(out[0], 13, 10, colC,
+                    "back piece beds down under the face (5 < 30)");
+            checkPx(out[0], 11, 7, colB,
+                    "back piece shows where nothing covers it");
+            checkPx(out[0], 16, 7, colA,
+                    "front piece wins over the back piece on shared cells");
+            checkPx(out[0], 12, 15, colE,
+                    "bare skin defends the arm (body 45 > top 20)");
+        }
+    }
+
+    // ---- back view (hair only): the pieces CROSS (plan D3) / 背面（仅
+    //       hair）：两片交叉 ----
+    // front piece (18,6)=A mirrors to (13,6) as the BEDDING; back piece
+    // (18,10)=B mirrors to (13,10) as the TOP layer. The shared cell (16,7)
+    // mirrors to (15,7): the back piece's mirror (top layer) must win it.
+    // Hair only here — on the full recipe the face piece's own back fills the
+    // head with the rear hair mass (correct: the back of a head IS hair), and
+    // that would hide the bedding. The face relation is covered by the front
+    // checks above.
+    // 前发 (18,6)=A 镜像到 (13,6) 垫底；后发 (18,10)=B 镜像到 (13,10) 盖顶。
+    // 共格 (16,7) 镜像到 (15,7)：后发镜像（盖顶）必须赢。此处只放 hair ——
+    // 全配方里 face 件自己的背面会把头区填成后脑发团（正确：后脑勺就是头发），
+    // 会盖住垫底。脸的关系由上面的正面断言覆盖。
+    {
+        fb::ComposeRecipe rec;
+        rec.templateName = spec.name;
+        rec.items["hair"] = "two_piece";
+        cv::Mat out[3];
+        if (!fb::composeThreeViews(rec, lib, spec, out, err)) {
+            std::cout << "  back: compose FAILED: " << err << "   FAIL\n";
+            ++failures;
+        } else {
+            checkPx(out[2], 13, 6, colA,
+                    "back: front piece mirrors to the bedding");
+            checkPx(out[2], 13, 10, colB,
+                    "back: back piece mirrors to the top layer");
+            checkPx(out[2], 15, 7, colB,
+                    "back: back piece's mirror wins the shared cell");
+        }
+    }
+
+    // ---- single-piece compat: stamped twice, keeps its cell / 单片兼容：----
+    {
+        fb::ComposeRecipe rec;
+        rec.templateName = spec.name;
+        rec.items["hair"] = "single";
+        cv::Mat out[3];
+        if (!fb::composeThreeViews(rec, lib, spec, out, err)) {
+            std::cout << "  single-piece: compose FAILED: " << err << "   FAIL\n";
+            ++failures;
+        } else {
+            checkPx(out[0], 15, 6, colF,
+                    "single-piece item stamped twice still paints its cell");
+        }
+    }
+
+    fs::remove_all(root, ec);
+    std::cout << (failures ? "COMPOSE LAYERS GATE FAIL\n"
+                           : "COMPOSE LAYERS GATE OK\n");
     return failures ? 1 : 0;
 }
 
@@ -2893,6 +3114,7 @@ int runCli(int argc, char** argv) {
     if (a.backinferGate)      return runBackinferGate(a);
     if (a.fillGate)           return runFillGate(a);
     if (a.regionGate)         return runRegionGate(a);
+    if (a.composeLayersGate)  return runComposeLayersGate(a);
     if (a.compose)     return runCompose(a);
     if (a.composeGate) return runComposeGate(a);
     if (a.fourdir)     return runFourdir(a);

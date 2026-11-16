@@ -204,51 +204,99 @@ bool composeThreeViews(const ComposeRecipe& recipe, const PartsLibrary& lib,
                 return false;
             }
 
-            cv::Mat sprite = item->views[v];
-            if (sprite.empty() && v == 2 && item->backMode == "auto") {
-                // Per-item inference (P2b rules on the item's own silhouette):
-                // hair mirrors, body flattens; a hand-drawn back ("file") is
-                // never touched because its sprite is not empty.
-                // 逐物品推断（P2b 规则作用于物品自身剪影）：头发镜像、身体压平；
-                // 手绘背面（"file"）精灵非空，永不走此路径。
-                std::string ierr;
-                sprite = inferBackView(item->views[0], item->views[1], spec, ierr);
-                if (sprite.empty()) {
-                    err = "back inference failed for " + slot + "/" +
-                          item->name + ": " + ierr;
+            // Resolve this view's TWO layers (v0.12.0 plan D3): a back-layer
+            // piece (hair back-of-head — the bedding under clothes and face)
+            // and the main piece (on top). A single-piece item stamps its
+            // main sprite twice, pixel-identical to the old single-layer
+            // look. On the back view with back:"auto", the pieces CROSS: the
+            // front piece's inference becomes the bedding and the back
+            // piece's inference becomes the top layer (front hair mirrors to
+            // the bedding, back hair mirrors to the top — the user's
+            // "reverse the order, flip horizontally" rule).
+            // 解析本视图的【两层】（v0.12.0 计划 D3）：垫底片（hair 后发片 ——
+            // 衣服和脸下面的衬底）与主片（盖顶）。单片件主片贴两次 —— 与旧单层
+            // 观感逐像素一致。背面 + back:"auto" 时两片【交叉】：前发（主片）的
+            // 推断变垫底、后发（垫底片）的推断变盖顶（前发镜像垫底、后发镜像
+            // 盖顶 —— 用户的"顺序反过来、水平翻转"规则）。
+            cv::Mat mainPiece, backPiece;
+            if (v == 2 && item->backMode == "auto") {
+                if (slot == "hair") {
+                    // Plan D3: hair pieces are PURE horizontal mirrors of the
+                    // front pieces — the front piece's mirror beds down, the
+                    // back piece's mirror covers (the user's "flip once"
+                    // rule). The old whole-item inference (mirror + rear-mass
+                    // fill) is a single-layer relic and is not used here.
+                    // 计划 D3：发片是正面片的【纯水平镜像】—— 前发镜像垫底、
+                    // 后发镜像盖顶（用户的"翻转一次"规则）。旧的整件推断
+                    // （镜像 + 后脑发底填充）是单层时代的遗物，此处不再使用。
+                    cv::flip(item->views[0], backPiece, 1);
+                    if (item->hasB[0])
+                        cv::flip(item->viewsB[0], mainPiece, 1);
+                    else
+                        mainPiece = backPiece.clone();
+                } else {
+                    std::string ierr;
+                    backPiece = inferBackView(item->views[0], item->views[1],
+                                              spec, ierr);
+                    if (backPiece.empty()) {
+                        err = "back inference failed for " + slot + "/" +
+                              item->name + ": " + ierr;
+                        return false;
+                    }
+                    if (item->hasB[0]) {
+                        const cv::Mat& sideB =
+                            item->hasB[1] ? item->viewsB[1] : item->views[1];
+                        mainPiece = inferBackView(item->viewsB[0], sideB,
+                                                  spec, ierr);
+                        if (mainPiece.empty()) {
+                            err = "back-piece inference failed for " + slot +
+                                  "/" + item->name + ": " + ierr;
+                            return false;
+                        }
+                    } else {
+                        mainPiece = backPiece.clone();
+                    }
+                }
+            } else {
+                mainPiece = item->views[v];
+                if (mainPiece.empty()) {
+                    err = "item " + slot + "/" + item->name + " has no " +
+                          (v == 2 ? "back" : (v == 0 ? "front" : "side")) +
+                          " sprite";
                     return false;
                 }
-            }
-            if (sprite.empty()) {
-                err = "item " + slot + "/" + item->name + " has no " +
-                      (v == 2 ? "back" : (v == 0 ? "front" : "side")) +
-                      " sprite";
-                return false;
+                backPiece = item->hasB[v] ? item->viewsB[v] : item->views[v];
             }
 
-            PartLayer layer;
-            layer.slot = slot;
-            layer.name = item->name;
-            layer.sprite = sprite.clone();   // recolour a copy / 换色作用于拷贝
-            layer.anchor = cv::Rect(0, 0, spec.size.width, spec.size.height);
-            layer.zOrder = item->zOrder;
+            for (int piece = 0; piece < 2; ++piece) {
+                PartLayer layer;
+                layer.slot = slot;
+                layer.name = item->name;
+                layer.sprite = (piece == 0 ? backPiece : mainPiece).clone();
+                layer.anchor = cv::Rect(0, 0, spec.size.width, spec.size.height);
+                // The bedding always beds down at z=5; the main piece keeps
+                // the item's zOrder (explicit or the slot table).
+                // 垫底片恒在 z=5；主片用物品的 zOrder（显式或槽位表）。
+                layer.zOrder = piece == 0 ? defaultLayerZ(slot, true)
+                                          : item->zOrder;
 
-            // The item's own colours first, then the recipe's global overrides.
-            // 物品自身颜色在前，配方全局覆盖在后。
-            for (const auto& ro : item->roleColors) {
-                PartLayer::RoleColor rc;
-                if (!toRoleColor(ro, spec, rc, err)) return false;
-                layer.paletteRoles.push_back(rc);
-            }
-            for (const auto& ro : recipe.roleOverrides) {
-                PartLayer::RoleColor rc;
-                if (!toRoleColor(ro, spec, rc, err)) return false;
-                layer.paletteRoles.push_back(rc);
-            }
-            if (!layer.paletteRoles.empty())
-                applyPaletteRoles(layer.sprite, layer.paletteRoles);
+                // The item's own colours first, then the recipe's global
+                // overrides. / 物品自身颜色在前，配方全局覆盖在后。
+                for (const auto& ro : item->roleColors) {
+                    PartLayer::RoleColor rc;
+                    if (!toRoleColor(ro, spec, rc, err)) return false;
+                    layer.paletteRoles.push_back(rc);
+                }
+                for (const auto& ro : recipe.roleOverrides) {
+                    PartLayer::RoleColor rc;
+                    if (!toRoleColor(ro, spec, rc, err)) return false;
+                    layer.paletteRoles.push_back(rc);
+                }
+                if (!layer.paletteRoles.empty())
+                    applyPaletteRoles(layer.sprite, layer.paletteRoles);
 
-            cs.layers.push_back(layer);
+                cs.layers.push_back(std::move(layer));
+            }
         }
         out[v] = compositeCharacter(cs);
     }

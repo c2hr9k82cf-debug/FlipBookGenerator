@@ -264,6 +264,18 @@ add_test(
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
+# D3 layering gate (v0.12.0): the back piece beds down under the face, the
+# front piece covers it, bare skin defends the arms, the back view crosses
+# the pieces (mirror rules), single-piece items stamp twice.
+# D3 层序闸门（v0.12.0）：后发垫底、前发盖脸、裸肤护臂、背面两片交叉（镜像
+# 规则）、单片件贴两次。
+add_test(
+    NAME compose_layers
+    COMMAND flipbook --compose-layers-gate
+            --templates ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
 # Composer gate (v0.10.1): six reference items recompose the reference views
 # byte-exact, role overrides recolour exactly, back:"auto" equals per-item
 # inference, recipes round-trip, and the composed views produce the same
