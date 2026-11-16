@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(FlipBookGenerator VERSION 0.11.4 LANGUAGES CXX)
+project(FlipBookGenerator VERSION 0.12.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -52,6 +52,7 @@ add_library(flipbook_core STATIC
     src/core/sheet.cpp
     src/core/align.cpp
     src/core/json_min.cpp
+    src/core/regions.cpp
     src/core/template_spec.cpp
     src/core/backinfer.cpp
     src/core/part_editor.cpp
@@ -245,6 +246,19 @@ add_test(
 add_test(
     NAME fill
     COMMAND flipbook --fill-gate
+            --templates ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates
+            --assets ${CMAKE_CURRENT_SOURCE_DIR}/assets
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+# Region-box gate (v0.12.0): the drawing contract — chibi_regions.json must be
+# self-consistent, every reference item must sit inside its slot's box, and a
+# synthetic out-of-box pixel must be caught.
+# 轮廓框闸门（v0.12.0）：绘制契约 —— chibi_regions.json 必须自洽；每件参考件
+# 必须坐在本槽框内；合成的框外像素必须被抓住。
+add_test(
+    NAME region_boxes
+    COMMAND flipbook --region-gate
             --templates ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates
             --assets ${CMAKE_CURRENT_SOURCE_DIR}/assets
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}

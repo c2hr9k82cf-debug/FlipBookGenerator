@@ -21,6 +21,7 @@
 #include "core/part_editor.h"
 #include "core/parts.h"
 #include "core/parts_library.h"
+#include "core/regions.h"
 #include "core/template_spec.h"
 #include "spritesheet.h"
 #include "extractor.h"
@@ -138,6 +139,13 @@ void printCliUsage() {
         "      不得被换色），splitFrameToParts 按逐视图 part_map 划分 —— 与已提交\n"
         "      部件包（精灵 + bbox）逐字节比对。\n"
         "\n"
+        "  flipbook --region-gate [--templates DIR] [--assets DIR]\n"
+        "      Region-box gate (v0.12.0): the drawing contract — the region\n"
+        "      JSON must be self-consistent, every reference item must sit\n"
+        "      inside its slot's box, and a synthetic out-of-box pixel must be\n"
+        "      caught. / 轮廓框闸门（v0.12.0）：绘制契约 —— 区域 JSON 必须自洽，\n"
+        "      参考件必须坐在本槽框内，合成的框外像素必须被抓住。\n"
+        "\n"
         "  flipbook --parts-library-gate\n"
         "      Parts library gate (v0.9.1): load a synthesised library, then\n"
         "      verify every known bad shape is refused (missing files, bad json,\n"
@@ -238,6 +246,7 @@ struct CliArgs {
     bool partsLibraryGate   = false;
     bool backinferGate      = false;
     bool fillGate           = false;
+    bool regionGate         = false;   // v0.12.0 drawing contract / 绘制契约
 
     // Composer (v0.10.1) / 合成器（v0.10.1）
     std::string library = "assets/parts_library";
@@ -308,6 +317,8 @@ bool parseArgs(int argc, char** argv, CliArgs& a, std::string& err) {
             a.backinferGate = true;
         } else if (s == "--fill-gate") {
             a.fillGate = true;
+        } else if (s == "--region-gate") {
+            a.regionGate = true;
         } else if (s == "--compose") {
             a.compose = true;
         } else if (s == "--compose-gate") {
@@ -1213,6 +1224,81 @@ int runPartsSemanticsGate(const CliArgs& a) {
 // Parts library gate (v0.9.1): a synthesised library must load with all
 // metadata intact, and every known bad shape must be refused with a reason.
 // 部件库闸门（v0.9.1）：合成库必须完整加载，已知坏形态必须全部被拒并给出原因。
+// Region-box gate (v0.12.0): the drawing contract self-check. The JSON must
+// be self-consistent; the six reference items (sliced from the character the
+// chips depict) must sit inside their slot's boxes; a synthetic out-of-box
+// pixel must be caught and an in-box pixel must pass.
+// 轮廓框闸门（v0.12.0）：绘制契约自检。JSON 必须自洽；六件参考件（从芯片所画
+// 角色身上切出）必须坐在本槽框内；合成的框外像素必须被抓住，框内像素放行。
+int runRegionGate(const CliArgs& a) {
+    int failures = 0;
+    fb::RegionBoxes boxes;
+    std::string err;
+    if (!fb::loadRegions(a.templates + "/chibi_regions.json", boxes, err)) {
+        std::cout << "loadRegions: " << err << "   FAIL\n";
+        return 1;
+    }
+    const char* kSlots[6] = {"hair", "face", "top", "pants", "boots", "body"};
+    std::cout << "loadRegions: self-consistent";
+    for (const char* s : kSlots) {
+        if (!boxes.hasSlot(s)) {
+            std::cout << "\n  missing slot " << s << "   FAIL\n";
+            return 1;
+        }
+        std::cout << "  " << s << "=" << boxes.count(s);
+    }
+    std::cout << "   OK\n";
+
+    for (const char* s : kSlots) {
+        for (const char* view : {"front", "side"}) {
+            const std::string p = a.assets + "/parts_library/" + s + "/ref_" +
+                                  s + "/" + view + ".png";
+            cv::Mat img = cv::imread(p, cv::IMREAD_UNCHANGED);
+            const int bad = img.empty() ? -1 : fb::outOfBoxPixels(img, s, boxes);
+            if (bad != 0) {
+                std::cout << "ref " << s << "/" << view << ": "
+                          << (bad < 0 ? std::string("cannot read")
+                                      : std::to_string(bad) + " out-of-box pixels")
+                          << "   FAIL\n";
+                ++failures;
+            }
+        }
+    }
+    if (!failures)
+        std::cout << "reference items inside their boxes (12 sprites)   OK\n";
+
+    // Synthetic check: one pixel outside the box must be flagged, one inside
+    // must pass. / 合成自检：框外一像素必须被抓，框内一像素必须放行。
+    {
+        int inX = -1, inY = -1, outX = -1, outY = -1;
+        for (int y = 0; y < boxes.cell; ++y)
+            for (int x = 0; x < boxes.cell; ++x) {
+                if (inX < 0 && boxes.contains("top", x, y)) { inX = x; inY = y; }
+                if (outX < 0 && !boxes.contains("top", x, y)) { outX = x; outY = y; }
+            }
+        cv::Mat img(boxes.cell, boxes.cell, CV_8UC4, cv::Scalar(0, 0, 0, 0));
+        img.at<cv::Vec4b>(inY, inX) = cv::Vec4b(1, 2, 3, 255);
+        const int bad1 = fb::outOfBoxPixels(img, "top", boxes);
+        img.at<cv::Vec4b>(inY, inX) = cv::Vec4b(0, 0, 0, 0);
+        img.at<cv::Vec4b>(outY, outX) = cv::Vec4b(1, 2, 3, 255);
+        const int bad2 = fb::outOfBoxPixels(img, "top", boxes);
+        if (bad1 != 0 || bad2 != 1) {
+            std::cout << "synthetic: in-box flagged (" << bad1
+                      << ") or out-of-box missed (" << bad2 << ")   FAIL\n";
+            ++failures;
+        } else {
+            std::cout << "synthetic out-of-box caught, in-box passed   OK\n";
+        }
+    }
+
+    if (failures) {
+        std::cout << "region boxes: " << failures << " failure(s)   FAIL\n";
+        return 1;
+    }
+    std::cout << "region boxes: all checks passed   OK\n";
+    return 0;
+}
+
 int runPartsLibraryGate(const CliArgs& a) {
     (void)a;
     namespace fs = std::filesystem;
@@ -2768,6 +2854,7 @@ int runCli(int argc, char** argv) {
     if (a.partsLibraryGate)   return runPartsLibraryGate(a);
     if (a.backinferGate)      return runBackinferGate(a);
     if (a.fillGate)           return runFillGate(a);
+    if (a.regionGate)         return runRegionGate(a);
     if (a.compose)     return runCompose(a);
     if (a.composeGate) return runComposeGate(a);
     if (a.fourdir)     return runFourdir(a);
