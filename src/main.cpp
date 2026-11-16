@@ -158,6 +158,21 @@ void printCliUsage() {
         "      —— 拆参考视图得 ref_* 精灵逐字节，分类 24 张芯片帧得\n"
         "      chibi_regions.json 的框。\n"
         "\n"
+        "  flipbook --replace-fidelity-gate [--templates DIR] [--chips DIR]\n"
+        "      Replace-fidelity gate (v0.13.0): user view == reference with an\n"
+        "      identity map — all 24 replaced frames must be byte-exact to the\n"
+        "      chip frames (lossless when nothing is customised).\n"
+        "      替换保真闸门（v0.13.0）：用户视图 == 参考、映射恒等 —— 24 帧替换\n"
+        "      输出必须逐字节等于芯片帧（无自定义时替换无损）。\n"
+        "\n"
+        "  flipbook --replace-custom-gate [--templates DIR] [--chips DIR]\n"
+        "      Replace-custom gate (v0.13.0): custom shapes enter the frames\n"
+        "      (hat extension stamps every frame), no frame punches holes, and\n"
+        "      the arm/clothes rule holds per frame (skin defends arm cells,\n"
+        "      a custom sleeve replaces a shirt cell).\n"
+        "      替换自定义闸门（v0.13.0）：自定义形状进帧（扩展的帽子盖到每一帧）、\n"
+        "      不出洞、衣/臂规则逐帧成立（肤护臂格、自定义袖替换上衣格）。\n"
+        "\n"
         "  flipbook --compose-layers-gate [--templates DIR]\n"
         "      D3 layering gate (v0.12.0): the back piece beds down under the\n"
         "      face, the front piece covers it, bare skin defends the arms,\n"
@@ -270,6 +285,8 @@ struct CliArgs {
     bool editorBoxGate      = false;   // v0.12.0 save-side contract / 保存侧契约
     bool composeLayersGate  = false;   // v0.12.0 D3 layering / D3 层序
     bool replaceClassifyGate = false;  // v0.13.0 region classifier / 区域分类器
+    bool replaceFidelityGate = false;  // v0.13.0 lossless replacement / 无损替换
+    bool replaceCustomGate   = false;  // v0.13.0 custom shapes in frames / 自定义进帧
 
     // Composer (v0.10.1) / 合成器（v0.10.1）
     std::string library = "assets/parts_library";
@@ -344,6 +361,10 @@ bool parseArgs(int argc, char** argv, CliArgs& a, std::string& err) {
             a.regionGate = true;
         } else if (s == "--replace-classify-gate") {
             a.replaceClassifyGate = true;
+        } else if (s == "--replace-fidelity-gate") {
+            a.replaceFidelityGate = true;
+        } else if (s == "--replace-custom-gate") {
+            a.replaceCustomGate = true;
         } else if (s == "--editor-box-gate") {
             a.editorBoxGate = true;
         } else if (s == "--compose-layers-gate") {
@@ -1518,6 +1539,333 @@ int runReplaceClassifyGate(const CliArgs& a) {
         return 1;
     }
     std::cout << "replace classify: all checks passed   OK\n";
+    return 0;
+}
+
+// The replace-fidelity gate: user view == reference, identity map — every
+// replaced frame must be the chip frame byte-exact (24 frames). This is the
+// strongest regression for M21: replacement without customisation must be
+// lossless. Proven in the design (both candidates resolve to the chip pixel);
+// pinned here so a future rule change cannot drift.
+// 替换保真闸门：用户视图 == 参考、映射恒等 —— 替换输出必须逐字节等于芯片帧
+// （24 帧）。这是 M21 最强的回归：无自定义时替换必须无损。设计中已证
+// （两候选同归芯片像素）；这里钉死，将来规则改动不得漂移。
+int runReplaceFidelityGate(const CliArgs& a) {
+    std::string err;
+    int failures = 0;
+
+    fb::TemplateSpec spec;
+    if (!fb::loadTemplateSpec(a.templates + "/chibi_standard.json", spec, err)) {
+        std::cout << "loadTemplateSpec: " << err << "   FAIL\n";
+        return 1;
+    }
+    fb::SlotTables tables;
+    if (!fb::buildSlotTables(spec, tables, err)) {
+        std::cout << "buildSlotTables: " << err << "   FAIL\n";
+        return 1;
+    }
+    std::map<std::string, std::vector<int>> bodyTop;
+    if (!fb::loadAnimBodyTop(a.templates + "/anim_reference.json", bodyTop, err)) {
+        std::cout << "loadAnimBodyTop: " << err << "   FAIL\n";
+        return 1;
+    }
+    fb::ChipSet chips;
+    if (!fb::loadChipSet(a.chips, chips, err)) {
+        std::cout << "loadChipSet: " << err << "   FAIL\n";
+        return 1;
+    }
+
+    auto sameMat = [](const cv::Mat& x, const cv::Mat& y) {
+        return x.size() == y.size() && x.type() == y.type() &&
+               std::memcmp(x.data, y.data, x.total() * x.elemSize()) == 0;
+    };
+    const char* viewNames[3] = {"front", "side", "back"};
+    int checked = 0;
+    for (int v = 0; v < 3; ++v) {
+        cv::Mat ref = fb::renderTemplateView(spec, v, err);
+        if (ref.empty()) {
+            std::cout << viewNames[v] << ": " << err << "   FAIL\n";
+            ++failures;
+            continue;
+        }
+        // Identity map via the extractor (also pins the round trip).
+        // 恒等映射也走提取器（顺带钉死往返）。
+        fb::PaletteMap idMap;
+        if (!fb::extractPaletteMap(ref, ref, idMap, err)) {
+            std::cout << viewNames[v] << ": extractPaletteMap " << err
+                      << "   FAIL\n";
+            ++failures;
+            continue;
+        }
+        const fb::SlotSplit sp = fb::splitViewBySlot(ref, idMap, tables);
+        for (int anim = 0; anim < 2; ++anim) {
+            const std::string name = std::string(viewNames[v]) +
+                                     (anim ? "_walk" : "_idle");
+            const fb::MotionChips* mc = chips.find(name);
+            if (!mc) {
+                std::cout << name << ": missing flipbook   FAIL\n";
+                ++failures;
+                continue;
+            }
+            const std::vector<cv::Mat> out = fb::renderReplaced(
+                *mc, idMap, ref, sp.slotOf, ref, bodyTop[name], tables);
+            if (out.size() != mc->frames.size()) {
+                std::cout << name << ": renderReplaced returned "
+                          << out.size() << " frames, chips have "
+                          << mc->frames.size() << "   FAIL\n";
+                ++failures;
+                continue;
+            }
+            for (size_t i = 0; i < out.size(); ++i) {
+                if (!sameMat(out[i], mc->frames[i])) {
+                    std::cout << name << " f" << i
+                              << ": replaced != chip frame   FAIL\n";
+                    ++failures;
+                }
+                ++checked;
+            }
+        }
+    }
+    if (checked != 24) {
+        std::cout << "expected 24 frames checked, got " << checked
+                  << "   FAIL\n";
+        ++failures;
+    }
+    if (failures) {
+        std::cout << "replace fidelity: " << failures << " failure(s)   FAIL\n";
+        return 1;
+    }
+    std::cout << "replace fidelity: 24/24 frames byte-exact vs chips   OK\n";
+    return 0;
+}
+
+// The replace-custom gate: custom shapes and colours really enter the frames.
+// A hat extension (palette-role colour over transparent reference cells) must
+// stamp every frame; no frame may punch a hole where the chip is opaque; and
+// the arm/clothes rule is checked per frame — a sleeve painted over a bare-skin
+// cell loses to the arm (skin defends), while a sleeve over a shirt cell wins
+// the tie and replaces the shirt (the user's shape enters).
+// 替换自定义闸门：自定义形状与颜色真的进帧。扩展的帽子（透明参考格上的调色板
+// 角色色）必须盖到每一帧；芯片不透明处不得出洞；衣/臂规则逐帧检查 —— 袖画到
+// 裸肤格输给手臂（肤护臂），袖画到上衣格平票胜出、替换上衣（用户形状进帧）。
+int runReplaceCustomGate(const CliArgs& a) {
+    std::string err;
+    int failures = 0;
+
+    fb::TemplateSpec spec;
+    if (!fb::loadTemplateSpec(a.templates + "/chibi_standard.json", spec, err)) {
+        std::cout << "loadTemplateSpec: " << err << "   FAIL\n";
+        return 1;
+    }
+    fb::SlotTables tables;
+    if (!fb::buildSlotTables(spec, tables, err)) {
+        std::cout << "buildSlotTables: " << err << "   FAIL\n";
+        return 1;
+    }
+    std::map<std::string, std::vector<int>> bodyTop;
+    if (!fb::loadAnimBodyTop(a.templates + "/anim_reference.json", bodyTop, err)) {
+        std::cout << "loadAnimBodyTop: " << err << "   FAIL\n";
+        return 1;
+    }
+    fb::ChipSet chips;
+    if (!fb::loadChipSet(a.chips, chips, err)) {
+        std::cout << "loadChipSet: " << err << "   FAIL\n";
+        return 1;
+    }
+
+    cv::Vec3b hairRgb, mintRgb, whiteRgb;
+    if (!spec.roleBgr("hair_mid", hairRgb) || !spec.roleBgr("mint", mintRgb) ||
+        !spec.roleBgr("white", whiteRgb)) {
+        std::cout << "palette missing hair_mid/mint/white   FAIL\n";
+        return 1;
+    }
+    const cv::Vec4b hatCol(hairRgb[0], hairRgb[1], hairRgb[2], 255);
+    const cv::Vec4b sleeveCol(mintRgb[0], mintRgb[1], mintRgb[2], 255);
+    const cv::Vec4b whiteCol(whiteRgb[0], whiteRgb[1], whiteRgb[2], 255);
+    const cv::Vec4b zero(0, 0, 0, 0);
+
+    const char* viewNames[3] = {"front", "side", "back"};
+    int hatChecked = 0, skinSeen = 0, skinSleeveSeen = 0, shirtSeen = 0,
+        customSeen = 0;
+    for (int v = 0; v < 3; ++v) {
+        cv::Mat ref = fb::renderTemplateView(spec, v, err);
+        if (ref.empty()) {
+            std::cout << viewNames[v] << ": " << err << "   FAIL\n";
+            ++failures;
+            continue;
+        }
+        fb::PaletteMap idMap;
+        if (!fb::extractPaletteMap(ref, ref, idMap, err)) {
+            std::cout << viewNames[v] << ": extractPaletteMap " << err
+                      << "   FAIL\n";
+            ++failures;
+            continue;
+        }
+
+        // The custom view: a hat over rows 0-1 (transparent reference), a
+        // sleeve painted over the first bare-skin cell, a white sleeve over
+        // the first shirt cell that is not already white.
+        // 自定义视图：行 0-1 上的帽子（参考处透明）、画在第一个裸肤格上的袖、
+        // 画在第一个非白上衣格上的白袖。
+        cv::Mat custom = ref.clone();
+        int skinCell[2] = {-1, -1}, shirtCell[2] = {-1, -1};
+        for (int y = 0; y < 32; ++y) {
+            for (int x = 0; x < 32; ++x) {
+                const cv::Vec4b px = ref.at<cv::Vec4b>(y, x);
+                if (px[3] == 0) continue;
+                const int s = tables.classifyPixel(cv::Vec3b(px[0], px[1], px[2]), y);
+                if (s == fb::SLOT_BODY && skinCell[0] < 0) {
+                    skinCell[0] = x; skinCell[1] = y;
+                }
+                if (s == fb::SLOT_TOP && shirtCell[0] < 0 &&
+                    px != whiteCol) {
+                    shirtCell[0] = x; shirtCell[1] = y;
+                }
+            }
+        }
+        for (int y = 0; y < 2; ++y)
+            for (int x = 12; x < 18; ++x)
+                custom.at<cv::Vec4b>(y, x) = hatCol;
+        if (skinCell[0] >= 0)
+            custom.at<cv::Vec4b>(skinCell[1], skinCell[0]) = sleeveCol;
+        if (shirtCell[0] >= 0)
+            custom.at<cv::Vec4b>(shirtCell[1], shirtCell[0]) = whiteCol;
+
+        const fb::SlotSplit sp = fb::splitViewBySlot(custom, idMap, tables);
+        if (skinCell[0] >= 0 &&
+            sp.slotOf.at<signed char>(skinCell[1], skinCell[0]) != fb::SLOT_TOP) {
+            std::cout << viewNames[v] << ": painted sleeve did not classify "
+                      << "as top   FAIL\n";
+            ++failures;
+        }
+
+        for (int anim = 0; anim < 2; ++anim) {
+            const std::string name = std::string(viewNames[v]) +
+                                     (anim ? "_walk" : "_idle");
+            const fb::MotionChips* mc = chips.find(name);
+            if (!mc) {
+                std::cout << name << ": missing flipbook   FAIL\n";
+                ++failures;
+                continue;
+            }
+            const std::vector<cv::Mat> out = fb::renderReplaced(
+                *mc, idMap, custom, sp.slotOf, ref, bodyTop[name], tables);
+            if (out.size() != mc->frames.size()) {
+                std::cout << name << ": renderReplaced returned "
+                          << out.size() << " frames   FAIL\n";
+                ++failures;
+                continue;
+            }
+            for (size_t i = 0; i < out.size(); ++i) {
+                const cv::Mat& C = mc->frames[i];
+                const cv::Mat& O = out[i];
+                const int off = bodyTop[name][i] - 2;
+                const cv::Mat slotC = fb::classifyFrame(C, off, tables);
+                // (A) the hat stamps every in-bounds frame position.
+                // (A) 帽子盖到每个界内帧位置。
+                for (int hy = 0; hy < 2; ++hy) {
+                    for (int hx = 12; hx < 18; ++hx) {
+                        const int fy = hy + off;
+                        if (fy < 0 || fy >= 32) continue;
+                        if (O.at<cv::Vec4b>(fy, hx) != hatCol) {
+                            std::cout << name << " f" << i << " hat (" << hx
+                                      << "," << fy << ") not stamped   FAIL\n";
+                            ++failures;
+                        }
+                        ++hatChecked;
+                    }
+                }
+                // (B) no holes: chip-opaque cells stay opaque.
+                // (B) 不出洞：芯片不透明处保持不透明。
+                for (int y = 0; y < 32; ++y) {
+                    for (int x = 0; x < 32; ++x) {
+                        if (C.at<cv::Vec4b>(y, x)[3] != 0 &&
+                            O.at<cv::Vec4b>(y, x)[3] == 0) {
+                            std::cout << name << " f" << i << " hole at ("
+                                      << x << "," << y << ")   FAIL\n";
+                            ++failures;
+                        }
+                    }
+                }
+                // (C) bare-skin cell: skin wins over the painted sleeve; a
+                //     shirt occupant shows the sleeve; a vacated cell stays
+                //     empty (no sleeve smear).
+                // (C) 裸肤格：肤胜过画上的袖；上衣占用出袖；腾空格保持空（袖不外溢）。
+                if (skinCell[0] >= 0) {
+                    const int x = skinCell[0], fy = skinCell[1] + off;
+                    if (fy >= 0 && fy < 32) {
+                        const int sC = slotC.at<signed char>(fy, x);
+                        const cv::Vec4b got = O.at<cv::Vec4b>(fy, x);
+                        if (sC == fb::SLOT_BODY) {
+                            ++skinSeen;
+                            if (got != C.at<cv::Vec4b>(fy, x)) {
+                                std::cout << name << " f" << i
+                                          << ": sleeve ate the skin   FAIL\n";
+                                ++failures;
+                            }
+                        } else if (sC == fb::SLOT_TOP) {
+                            ++skinSleeveSeen;
+                            if (got != sleeveCol) {
+                                std::cout << name << " f" << i
+                                          << ": sleeve missing on shirt "
+                                          << "occupant   FAIL\n";
+                                ++failures;
+                            }
+                        } else if (sC == fb::SLOT_NONE &&
+                                   C.at<cv::Vec4b>(fy, x)[3] == 0) {
+                            if (got != zero) {
+                                std::cout << name << " f" << i
+                                          << ": sleeve smeared into a "
+                                          << "vacated cell   FAIL\n";
+                                ++failures;
+                            }
+                        }
+                    }
+                }
+                // (D) shirt cell: the user's colour wins the tie and enters;
+                //     a bare-skin occupant still shows the skin.
+                // (D) 上衣格：用户色平票胜出、进帧；裸肤占用仍显肤。
+                if (shirtCell[0] >= 0) {
+                    const int x = shirtCell[0], fy = shirtCell[1] + off;
+                    if (fy >= 0 && fy < 32) {
+                        const int sC = slotC.at<signed char>(fy, x);
+                        const cv::Vec4b got = O.at<cv::Vec4b>(fy, x);
+                        if (sC == fb::SLOT_TOP) {
+                            ++shirtSeen;
+                            if (got != whiteCol) {
+                                std::cout << name << " f" << i
+                                          << ": custom sleeve did not enter "
+                                          << "the shirt cell   FAIL\n";
+                                ++failures;
+                            } else {
+                                ++customSeen;
+                            }
+                        } else if (sC == fb::SLOT_BODY) {
+                            if (got != C.at<cv::Vec4b>(fy, x)) {
+                                std::cout << name << " f" << i
+                                          << ": custom sleeve ate the skin "
+                                          << "at the shirt cell   FAIL\n";
+                                ++failures;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    std::cout << "hat stamps " << hatChecked << ", skin defends "
+              << skinSeen << " (" << skinSleeveSeen
+              << " sleeve-on-shirt at skin cells), custom enters "
+              << customSeen << " of " << shirtSeen << " shirt-cell frames\n";
+    if (hatChecked == 0 || skinSeen == 0 || shirtSeen == 0 || customSeen == 0) {
+        std::cout << "one of the behaviour counters is vacuous   FAIL\n";
+        ++failures;
+    }
+    if (failures) {
+        std::cout << "replace custom: " << failures << " failure(s)   FAIL\n";
+        return 1;
+    }
+    std::cout << "replace custom: all checks passed   OK\n";
     return 0;
 }
 
@@ -3555,6 +3903,8 @@ int runCli(int argc, char** argv) {
     if (a.fillGate)           return runFillGate(a);
     if (a.regionGate)         return runRegionGate(a);
     if (a.replaceClassifyGate) return runReplaceClassifyGate(a);
+    if (a.replaceFidelityGate) return runReplaceFidelityGate(a);
+    if (a.replaceCustomGate)   return runReplaceCustomGate(a);
     if (a.editorBoxGate)      return runEditorBoxGate(a);
     if (a.composeLayersGate)  return runComposeLayersGate(a);
     if (a.compose)     return runCompose(a);

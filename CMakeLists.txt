@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(FlipBookGenerator VERSION 0.12.0 LANGUAGES CXX)
+project(FlipBookGenerator VERSION 0.13.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -289,6 +289,29 @@ add_test(
     COMMAND flipbook --replace-classify-gate
             --templates ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates
             --assets ${CMAKE_CURRENT_SOURCE_DIR}/assets
+            --chips ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates/motion_chips
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+# Replace-fidelity gate (v0.13.0): user == reference with an identity map must
+# reproduce all 24 chip frames byte-exact — replacement without customisation
+# is lossless. Replace-custom gate: custom shapes enter the frames (hat
+# extension stamps every frame, no holes), and the arm/clothes rule holds per
+# frame (skin defends arm cells, a custom sleeve replaces a shirt cell).
+# 替换保真闸门（v0.13.0）：用户 == 参考、映射恒等必须逐字节复现 24 帧芯片 ——
+# 无自定义的替换是无损的。替换自定义闸门：自定义形状进帧（扩展的帽子盖到每一
+# 帧、不出洞），衣/臂规则逐帧成立（肤护臂格、自定义袖替换上衣格）。
+add_test(
+    NAME replace_fidelity
+    COMMAND flipbook --replace-fidelity-gate
+            --templates ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates
+            --chips ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates/motion_chips
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+add_test(
+    NAME replace_custom
+    COMMAND flipbook --replace-custom-gate
+            --templates ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates
             --chips ${CMAKE_CURRENT_SOURCE_DIR}/assets/templates/motion_chips
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
