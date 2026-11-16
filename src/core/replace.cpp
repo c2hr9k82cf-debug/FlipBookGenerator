@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <set>
 #include <sstream>
 
 namespace fb {
@@ -25,31 +26,41 @@ inline unsigned int packBgr(const cv::Vec3b& c) {
 constexpr int kBandLo = -2, kBandHi = 33, kBandN = kBandHi - kBandLo + 1;
 
 // The one assignment core: classify every opaque pixel, then let outline
-// pixels join by 8-neighbour vote. map = {} reads raw role colours.
+// pixels join by 8-neighbour vote. map = {} reads raw role colours. When the
+// map cannot classify a recoloured pixel (ambiguous dst, or a minority colour
+// the extraction repaired away), the reference design at the same cell decides
+// the slot. ref = {} disables that fallback.
 // 唯一归属核心：先分类所有不透明像素，再让描边像素按 8 邻投票归槽。
-// map = {} 时按原始角色色读。
+// map = {} 时按原始角色色读。映射分不出槽时（歧义 dst、被多数派修复掉的少数派
+// 色），由同一格的参考设计定槽。ref = {} 时无此兜底。
 cv::Mat assignSlots(const cv::Mat& img, int off, const SlotTables& t,
-                    const PaletteMap& map) {
+                    const PaletteMap& map, const cv::Mat& ref) {
     // SLOT_NONE (=-1), NOT zero — zero is SLOT_HAIR, and transparent cells
     // must not vote in the outline pass.
     // SLOT_NONE（=-1），不是零 —— 零是 SLOT_HAIR，透明格绝不能给描边投票。
     cv::Mat slotOf(img.rows, img.cols, CV_8SC1, cv::Scalar(SLOT_NONE));
     // Per-pixel preimage resolution: scan the map for the dst colour, take the
     // classify of its src role colours. A unique result wins; two distinct
-    // results = an ambiguous recolour -> fall back to the raw read.
-    // 逐像素原像解析：扫 map 找 dst 色，取其 src 角色色的 classify。唯一结果
-    // 胜出；两个不同结果 = 换色歧义 -> 退回原始读取。
+    // results = an ambiguous recolour -> SLOT_UNKNOWN. An outline-only dst
+    // (the user's outline colour) returns SLOT_OUTLINE so the pixel joins the
+    // neighbour vote instead of being dropped.
+    // 逐像素原像解析：扫 map 找 dst 色，取其 src 角色色的 classify。唯一结果胜出；
+    // 两个不同结果 = 换色歧义 -> SLOT_UNKNOWN。纯描边 dst（用户的描边色）返回
+    // SLOT_OUTLINE，让像素进邻域投票而不是被丢弃。
     auto slotViaMap = [&](const cv::Vec4b& px, int yNorm) -> int {
         if (map.empty()) return SLOT_NONE;
         int got = SLOT_NONE;
+        bool sawOutline = false;
         for (const auto& kv : map) {
             if (kv.second != px) continue;
             const int s = t.classifyPixel(
                 cv::Vec3b(kv.first[0], kv.first[1], kv.first[2]), yNorm);
-            if (s < 0) continue;       // outline src: raw path handles it / 描边 src 走原始路径
+            if (s == SLOT_OUTLINE) { sawOutline = true; continue; }
+            if (s < 0) continue;       // unknown src / 未知 src
             if (got != SLOT_NONE && got != s) return SLOT_UNKNOWN;  // ambiguous / 歧义
             got = s;
         }
+        if (got == SLOT_NONE && sawOutline) return SLOT_OUTLINE;
         return got;
     };
 
@@ -62,9 +73,19 @@ cv::Mat assignSlots(const cv::Mat& img, int off, const SlotTables& t,
             const cv::Vec3b bgr(px[0], px[1], px[2]);
             int slot = slotViaMap(px, yNorm);
             if (slot == SLOT_UNKNOWN || slot == SLOT_NONE) {
-                // Fallback: read the pixel as a raw role colour.
-                // 兜底：把像素当原始角色色读。
-                slot = t.classifyPixel(bgr, yNorm);
+                // Fallback order: the reference design at this cell, then a raw
+                // role-colour read (the chips path, map = {}).
+                // 兜底顺序：本格的参考设计，然后原始角色色读取（芯片路径，map = {}）。
+                if (!ref.empty() && y < ref.rows && x < ref.cols) {
+                    const cv::Vec4b r = ref.at<cv::Vec4b>(y, x);
+                    if (r[3] != 0) slot = t.classifyPixel(
+                        cv::Vec3b(r[0], r[1], r[2]), yNorm);
+                }
+                if (slot == SLOT_UNKNOWN || slot == SLOT_NONE) {
+                    // Fallback: read the pixel as a raw role colour.
+                    // 兜底：把像素当原始角色色读。
+                    slot = t.classifyPixel(bgr, yNorm);
+                }
             }
             if (slot == SLOT_OUTLINE) {
                 outlinePx.push_back(cv::Point(x, y));
@@ -203,13 +224,13 @@ bool buildSlotTables(const TemplateSpec& spec, SlotTables& out, std::string& err
 }
 
 cv::Mat classifyFrame(const cv::Mat& frame, int off, const SlotTables& t) {
-    return assignSlots(frame, off, t, PaletteMap());
+    return assignSlots(frame, off, t, PaletteMap(), cv::Mat());
 }
 
 SlotSplit splitViewBySlot(const cv::Mat& view, const PaletteMap& map,
-                          const SlotTables& t) {
+                          const SlotTables& t, const cv::Mat& refView) {
     SlotSplit out;
-    out.slotOf = assignSlots(view, 0, t, map);
+    out.slotOf = assignSlots(view, 0, t, map, refView);
     // One fresh Mat per slot — Mat copies share pixels, assign() would make
     // the six sprites aliases of one buffer.
     // 每槽一张新 Mat —— Mat 拷贝共享像素，assign() 会让六精灵互为别名。
@@ -305,7 +326,11 @@ std::vector<cv::Mat> renderReplaced(const MotionChips& chips, const PaletteMap& 
                ((uint32_t)c[3] << 24);
     };
     std::map<uint32_t, cv::Vec4b> lut;
-    for (const auto& sw : map) lut[colourKey4(sw.first)] = sw.second;
+    std::set<uint32_t> dstSet;
+    for (const auto& sw : map) {
+        lut[colourKey4(sw.first)] = sw.second;
+        dstSet.insert(colourKey4(sw.second));
+    }
     auto mapColour = [&](const cv::Vec4b& px) {
         auto it = lut.find(colourKey4(px));
         return it == lut.end() ? px : it->second;
@@ -314,6 +339,11 @@ std::vector<cv::Mat> renderReplaced(const MotionChips& chips, const PaletteMap& 
     // hair 50. / 层序表。
     int zOf[6];
     for (int s = 0; s < 6; ++s) zOf[s] = defaultLayerZ(slotNames()[(size_t)s], false);
+
+    // Reference design slots (normal pose): the recession rule compares the
+    // frame cell's slot against the design cell the user omitted.
+    // 参考设计槽（规范姿态）：缩水规则用它比对用户删掉的设计格与帧内格是否同槽。
+    const cv::Mat refSlots = classifyFrame(refView, 0, t);
 
     frames.reserve(chips.frames.size());
     for (size_t f = 0; f < chips.frames.size(); ++f) {
@@ -334,9 +364,22 @@ std::vector<cv::Mat> renderReplaced(const MotionChips& chips, const PaletteMap& 
                 int bestZ = -1;
                 cv::Vec4b bestCol = zero;
                 bool have = false;
+                // Recession rule: the user deleted this design cell (reference
+                // opaque, user transparent) and the frame cell belongs to the
+                // same part — honour the deletion. Slot matching keeps a
+                // swinging limb that passes through the deleted cell intact.
+                // 缩水规则：用户删掉了这个设计格（参考不透明、用户透明）且帧内格
+                // 属于同一部件 —— 尊重删除。同槽比对保证扫过删除格的摆动肢体不被
+                // 挖洞。
+                bool suppressed = false;
+                if (Cpx[3] != 0 && Npx[3] != 0 && Upx[3] == 0 && inView) {
+                    const signed char sN = refSlots.at<signed char>(sy, x);
+                    const signed char sC = slotC.at<signed char>(y, x);
+                    suppressed = sN >= 0 && sN == sC;
+                }
                 // FRAME candidate: the chip occupant at its slot's layer.
                 // 帧占用候选：芯片像素，按其槽层序。
-                if (Cpx[3] != 0) {
+                if (Cpx[3] != 0 && !suppressed) {
                     const signed char sC = slotC.at<signed char>(y, x);
                     bestZ = (sC >= 0) ? zOf[(size_t)sC] : 0;   // unowned = bottom / 无主垫底
                     bestCol = mapColour(Cpx);
@@ -353,11 +396,23 @@ std::vector<cv::Mat> renderReplaced(const MotionChips& chips, const PaletteMap& 
                     if (sU >= 0) {
                         // M15 colour rule: follows the reference layout ->
                         // mapped chip colour (tone swaps survive); deviates ->
-                        // its own colour.
+                        // its own colour. A deviating colour that is no map
+                        // destination is a minority the extraction repaired
+                        // away (the GUI warns "majority chosen"): output the
+                        // repaired colour map(N), keeping the map a function.
                         // M15 色规：沿参考布局 -> 换色后的芯片色（色调交换存活）；
-                        // 偏离 -> 出自己的色。
+                        // 偏离 -> 出自己的色。偏离色若不是映射目标色，就是提取按
+                        // 主色修复掉的少数派（GUI 警告"已按主色处理"）：输出修复后
+                        // 的 map(N)，保持映射的函数性。
                         const bool follows = Npx[3] != 0 && Upx == mapColour(Npx);
-                        const cv::Vec4b colM = follows ? mapColour(Cpx) : Upx;
+                        cv::Vec4b colM;
+                        if (follows) {
+                            colM = mapColour(Cpx);
+                        } else if (Npx[3] != 0 && !dstSet.count(colourKey4(Upx))) {
+                            colM = mapColour(Npx);
+                        } else {
+                            colM = Upx;
+                        }
                         const int zM = zOf[(size_t)sU];
                         // Higher z wins, ties go to the material.
                         // z 大者胜，平票素材胜。

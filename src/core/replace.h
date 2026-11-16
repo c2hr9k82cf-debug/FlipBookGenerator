@@ -95,19 +95,23 @@ cv::Mat classifyFrame(const cv::Mat& frame, int off, const SlotTables& t);
 
 // Split a user view into six per-slot sprites. The view may be recoloured
 // (`map` = the extracted PaletteMap, ref colour -> user colour): a pixel's
-// slot first tries the map's preimage roles (unique preimage -> its slot),
-// then falls back to reading the pixel as a raw role colour. Without a map
-// (or on fallback) this is exactly classifyFrame at off=0.
+// slot first tries the map's preimage roles (unique preimage -> its slot; an
+// outline-only preimage joins the outline vote), then falls back to the
+// reference design at the same cell (ambiguous or repaired-away colours),
+// then to reading the pixel as a raw role colour. Without a map (or on
+// fallback) this is exactly classifyFrame at off=0.
 // 把用户视图拆成六槽精灵。视图可换过色（map = 提取的 PaletteMap，参考色 ->
-// 用户色）：像素槽归属先试 map 的原像角色（唯一原像 -> 其槽），失败再把像素
-// 当原始角色色读。不带 map（或走兜底）时与 classifyFrame(off=0) 完全一致。
+// 用户色）：像素槽归属先试 map 的原像角色（唯一原像 -> 其槽；纯描边原像进描边
+// 投票），再落到同一格的参考设计（歧义色、被修复掉的少数派色），最后把像素当
+// 原始角色色读。不带 map（或走兜底）时与 classifyFrame(off=0) 完全一致。
 struct SlotSplit {
     cv::Mat slotOf;                    // CV_8SC1, per-pixel slot / 逐像素槽
     std::vector<cv::Mat> sprites;      // 6 x CV_8UC4, pixels verbatim / 六精灵，像素原样
     int unassigned = 0;                // opaque pixels with no slot / 不透明无槽像素数
 };
 SlotSplit splitViewBySlot(const cv::Mat& view, const PaletteMap& map,
-                          const SlotTables& t);
+                          const SlotTables& t,
+                          const cv::Mat& refView = cv::Mat());
 
 // Read anim_reference.json -> flipbook name -> per-frame body_top_y. Keys are
 // the chip flipbook names (front_idle, front_walk, side_idle, side_walk,
@@ -130,15 +134,24 @@ bool loadAnimBodyTop(const std::string& jsonPath,
 // higher defaultLayerZ wins, ties go to the material. A material that
 // follows the reference colour layout outputs the mapped chip colour (the
 // per-frame tone/redraw language survives); a deviating material outputs its
-// own colour. With the user view equal to the reference and an identity map
-// every cell outputs the chip pixel exactly — the replace_fidelity
-// invariant, proven in the M21 design and gated in batch 3.
+// own colour — except a colour that is no map destination (an extraction
+// minority, already repaired per the tolerant warning): that one outputs
+// map(N). Recession: where the user deleted a design cell (reference opaque,
+// user transparent) the FRAME occupant of the same slot yields — the user's
+// smaller shape really shrinks; a swinging limb of another slot passes
+// untouched. With the user view equal to the reference and an identity map
+// no deletion or repair ever fires and every cell outputs the chip pixel
+// exactly — the replace_fidelity invariant, proven in the M21 design and
+// gated in batch 3.
 // 对每个帧格 (x,y)：帧占用（芯片像素，z = 槽层序，色 = PaletteMap(芯片)）与
 // 素材（用户视图在规范位置 (x,sy) 的像素，sy = y - (body_top_y - 2)）竞争。
 // 素材仅当参考处透明（用户形状扩展）或芯片画了这格才进候选；z 大者胜，平票
 // 素材胜。沿用参考色布局的素材输出换色后的芯片色（逐帧色调/重绘语言得以保留）
-// ；偏离的素材出自己的颜色。用户视图==参考且 map 恒等时逐格必输出芯片像素
-// —— replace_fidelity 不变量，M21 设计中已证，批次③闸门把守。
+// ；偏离的素材出自己的颜色 —— 唯一例外是非映射目标色的偏离色（提取的少数派，
+// 宽容警告里已声明按主色修复）：它输出 map(N)。缩水：用户删掉设计格（参考不
+// 透明、用户透明）时，同槽的帧占用让位 —— 用户的小形状真的变小；扫过的别的槽
+// 肢体原样通过。用户视图==参考且 map 恒等时删除与修复均不触发，逐格必输出芯片
+// 像素 —— replace_fidelity 不变量，M21 设计中已证，批次③闸门把守。
 //
 // `userSlots` = splitViewBySlot(userView, map, t).slotOf (pass it precomputed).
 // `refView`   = the normal-pose reference of this view (renderTemplateView).

@@ -1,11 +1,11 @@
 # FlipBookGenerator — Per-frame Region Replacement / 逐帧区域替换规范
 
-> The v0.13.0 renderer that brings **user shapes** into the animation frames:
+> The v0.13.1 renderer that brings **user shapes** into the animation frames:
 > one normal-pose user view in, six flipbooks out whose per-frame pixels are
 > the user's, not just a recolour of the template. Rules live in
 > `src/core/replace.cpp` (`renderReplaced`); this document is the contract.
 >
-> v0.13.0 的渲染器，把**用户形状**带进动画帧：一张规范姿态用户视图进去，六本
+> v0.13.1 的渲染器，把**用户形状**带进动画帧：一张规范姿态用户视图进去，六本
 > 翻页书出来的逐帧像素是用户的，而不只是模板换色。规则住在
 > `src/core/replace.cpp`（`renderReplaced`）；本文是契约。
 >
@@ -48,7 +48,7 @@ each cell `(x, y)` with `sy = y - off` (the normal-pose sample position):
 
 | Candidate / 候选 | Enters when / 进入条件 | z / 层 | Colour / 颜色 |
 |---|---|---|---|
-| **FRAME** (the chip occupant / 芯片占用) | `C(x,y)` non-transparent | `zOf(classifyFrame(C))`, unowned = 0 | `PaletteMap(C)` |
+| **FRAME** (the chip occupant / 芯片占用) | `C(x,y)` non-transparent, **not suppressed** (see recession / 不被**缩水**，见下) | `zOf(classifyFrame(C))`, unowned = 0 | `PaletteMap(C)` |
 | **MATERIAL** (the user's pixel / 用户像素) | `U(x,sy)` non-transparent **and** (`N(x,sy)` transparent **or** `C(x,y)` non-transparent) **and** `userSlots(x,sy) >= 0` | `zOf(userSlots)` | see M15 below / 见下 M15 |
 
 - `U` = the user view, `N` = the reference view (`renderTemplateView`), both in
@@ -63,6 +63,15 @@ each cell `(x, y)` with `sy = y - off` (the normal-pose sample position):
   摆腿腾空的格会继续显示静态素材（双腿重影）。
 - **Winner / 胜者**: higher `defaultLayerZ` wins; **ties go to the material**.
   z 大者胜；**平票素材胜**。
+- **Recession / 缩水**: where the user deleted a design cell (`N(x,sy)`
+  non-transparent, `U(x,sy)` transparent) and the frame cell belongs to the
+  same slot as that design cell (`classifyFrame(C)(x,y) == refSlots(x,sy)`),
+  the FRAME candidate is suppressed — the user's smaller shape really shrinks.
+  A swinging limb of **another** slot passing through the deleted cell is not
+  suppressed (slot mismatch) and survives untouched.
+  用户删掉了设计格（`N(x,sy)` 不透明、`U(x,sy)` 透明）且帧内格与该设计格**同槽**
+  （`classifyFrame(C)(x,y) == refSlots(x,sy)`）时，FRAME 候选让位 —— 用户的小
+  形状真的变小。**别的槽**的摆动肢体扫过删除格不受影响（异槽不匹配）、原样保留。
 - z table (`defaultLayerZ`, `src/core/parts_library.cpp`):
   pants/boots 10 < top 20 < face 30 < body (bare skin) 45 < hair 50.
   z 表：裤/靴 10 < 上衣 20 < 脸 30 < 裸肤 45 < 头发 50。
@@ -73,11 +82,48 @@ each cell `(x, y)` with `sy = y - off` (the normal-pose sample position):
 A material pixel that **follows** the reference colour layout
 (`N` non-transparent and `U == PaletteMap(N)`) outputs `PaletteMap(C)` — the
 chip's per-frame tone swaps and redraws survive. A **deviating** material (a
-user pattern / shape extension) outputs its own colour `U`.
+user pattern / shape extension) outputs its own colour `U` — **except** a
+colour that is no palette-map destination: that is an extraction minority the
+tolerant pass repaired to the majority (the GUI warns "majority chosen"), and
+it outputs `PaletteMap(N)`, keeping the map a function.
 
 **沿**参考色布局的素材（`N` 不透明且 `U == PaletteMap(N)`）输出
 `PaletteMap(C)` —— 芯片逐帧色调交换与重绘得以保留。**偏离**的素材（用户图案 /
-形状扩展）输出自己的颜色 `U`。
+形状扩展）输出自己的颜色 `U` —— **唯一例外**是非映射目标色：那是提取宽容处理时
+按多数派修复掉的少数派（GUI 警告"已按主色处理"），它输出 `PaletteMap(N)`，
+保持映射的函数性。
+
+### Slot assignment / 槽归属
+
+`splitViewBySlot` (→ `assignSlots`, `src/core/replace.cpp`) resolves each
+opaque pixel's slot in three steps — this is what lets recoloured and
+repaired views split correctly:
+
+`splitViewBySlot`（→ `assignSlots`，`src/core/replace.cpp`）三步解析每个不透明
+像素的槽 —— 换过色、被修复过的视图因此能正确拆分：
+
+1. **Map preimage / 映射原像**: scan the PaletteMap for the pixel's dst colour;
+   classify each src. Unique slot → its slot; two distinct slots (a merged
+   recolour, e.g. white and skin both mapped to one pale) → ambiguous; an
+   outline-only preimage (the user's outline colour) → `SLOT_OUTLINE`, joining
+   the neighbour vote instead of being dropped.
+   扫 PaletteMap 找该 dst 色，分类各 src。唯一槽 → 其槽；两个不同槽（合并换色，
+   如白与肤同映射一个浅色）→ 歧义；纯描边原像（用户的描边色）→ `SLOT_OUTLINE`，
+   进邻域投票而不是被丢弃。
+2. **Reference design / 参考设计**: on ambiguity or no preimage, the reference
+   design at the same cell decides (the shape follows the design's anatomy).
+   歧义或无原像时，同一格的参考设计定槽（形状随设计解剖结构走）。
+3. **Raw role colour / 原始角色色**: last resort — read the pixel as an
+   un-recoloured role colour (the chips path, empty map).
+   最后手段 —— 把像素当未换色的角色色读（芯片路径，空 map）。
+
+Outline pixels then join the slot their already-assigned 8-neighbours vote for
+(scan order, ties to the first seen — `Counter.most_common` parity with the
+Python tools). A pixel with no owner anywhere stays `SLOT_NONE` and its
+material never enters the frames.
+
+描边像素随后按"已归属 8 邻"投票进槽（扫描序，平票取先见 —— 与 Python 工具的
+`Counter.most_common` 一致）。处处无归属的像素保持 `SLOT_NONE`，其素材永不进帧。
 
 ### Per-frame arm/clothes rule / 逐帧衣臂规则
 
@@ -106,9 +152,12 @@ stays empty — the sleeve never smears into swing extremes.
    covered) is caught; a MATERIAL extension passes.
    非透明输出像素 ∈ 映射目标色 ∪ 用户视图颜色。FRAME 泄漏（提取没覆盖的芯片色）
    被抓住；MATERIAL 扩展放行。
-3. **No holes / 不出洞**: a chip-opaque cell is never transparent in the output
-   (the FRAME candidate always exists). 芯片不透明处在输出中永不透明（FRAME
-   候选总在）。
+3. **No holes beyond the user's deletion / 用户删除处之外不出洞**: a
+   chip-opaque cell is transparent in the output **only** where the recession
+   rule fired (the user deleted that design cell and the frame cell is the
+   same slot). Every other chip-opaque cell stays opaque.
+   芯片不透明处**仅当**缩水规则触发（用户删了该设计格且帧内格同槽）才透明。
+   其余芯片不透明处一律保持不透明。
 4. **Pixel-art hard rules / 像素风硬约束** still hold: nearest-neighbour only,
    no anti-aliasing, no blending at overlaps (z-order wins), integer-pixel
    translations. 照旧：只用最近邻、无抗锯齿、重叠无混合（z 序取胜）、整数像素平移。
@@ -144,7 +193,7 @@ GUI and the CLI drive the same code (golden invariant: byte-identical export).
 |---|---|
 | `--replace-classify-gate` | the classifier reproduces the committed tool artefacts (ref_* sprites, chibi_regions masks) / 分类器复现工具提交产物 |
 | `--replace-fidelity-gate` | lossless when nothing is customised (24/24 byte-exact) / 无自定义时无损（24/24 逐字节） |
-| `--replace-custom-gate` | custom shapes enter (hat stamps every frame), no holes, arm/clothes rule per frame / 自定义进帧（帽子盖满）、不出洞、衣臂逐帧成立 |
+| `--replace-custom-gate` | custom shapes enter (hat stamps every frame), outline tips vote in, no holes beyond the user's deletion, arm/clothes rule per frame, recession, merged-colour/stray repair / 自定义进帧（帽子盖满）、描边尖投票进槽、删除处之外不出洞、衣臂逐帧成立、缩水、合并色/游离色修复 |
 | `fourdir_sheet` (ctest) | the whole sheet pipeline incl. the coverage invariant / 全管线含覆盖不变量 |
 | golden invariant (manual) | `FLIPBOOK_AUTOTEST` GUI export == CLI `--fourdir` byte-identical / GUI 导出 == CLI 逐字节 |
 
@@ -152,9 +201,14 @@ GUI and the CLI drive the same code (golden invariant: byte-identical export).
 
 ## 5. Limits / 边界
 
-- Material pixels must use **palette role colours** — an arbitrary RGB
-  classifies to no slot and is dropped (`userSlots < 0`).
-  素材像素必须用**调色板角色色** —— 任意 RGB 分不出槽，会被丢弃。
+- Material pixels should use **palette role colours** — an arbitrary RGB
+  classifies to no slot on its own and falls back to the reference design at
+  the same cell (then raw role read); only a pixel no route can own is dropped
+  (`userSlots < 0`). A deviating non-destination colour is repaired to
+  `PaletteMap(N)` (M15 exception).
+  素材像素应当用**调色板角色色** —— 任意 RGB 自己分不出槽时落到同一格的参考设计
+  （再落原始角色色读）；只有各路都无主的像素才被丢弃（`userSlots < 0`）。偏离的
+  非目标色被修复为 `PaletteMap(N)`（M15 例外）。
 - Strict extraction (`--fourdir`) requires the user silhouette to match the
   template; shape *extensions* are tolerated only in GUI/tolerant mode (the
   extension pixels are then routed in as MATERIAL).

@@ -142,7 +142,7 @@ bool buildFourDirSheet(const cv::Mat& front, const cv::Mat& side, const cv::Mat&
                   " reference view: " + refErr;
             return false;
         }
-        const SlotSplit userSplit = splitViewBySlot(*views[v], out.maps[v], tables);
+        const SlotSplit userSplit = splitViewBySlot(*views[v], out.maps[v], tables, refView);
 
         const std::string idleName = std::string(viewNames[v]) + "_idle";
         const std::string walkName = std::string(viewNames[v]) + "_walk";

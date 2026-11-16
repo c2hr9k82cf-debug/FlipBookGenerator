@@ -1435,7 +1435,7 @@ int runReplaceClassifyGate(const CliArgs& a) {
                 ++failures;
                 continue;
             }
-            fb::SlotSplit sp = fb::splitViewBySlot(view, map, tables);
+            fb::SlotSplit sp = fb::splitViewBySlot(view, map, tables, view);
             // Tiling: every opaque pixel gets exactly one slot (disjoint by
             // construction — one slot map). / 铺满：每个不透明像素恰得一槽
             // （构造上互斥 —— 单张槽图）。
@@ -1597,7 +1597,7 @@ int runReplaceFidelityGate(const CliArgs& a) {
             ++failures;
             continue;
         }
-        const fb::SlotSplit sp = fb::splitViewBySlot(ref, idMap, tables);
+        const fb::SlotSplit sp = fb::splitViewBySlot(ref, idMap, tables, ref);
         for (int anim = 0; anim < 2; ++anim) {
             const std::string name = std::string(viewNames[v]) +
                                      (anim ? "_walk" : "_idle");
@@ -1686,7 +1686,8 @@ int runReplaceCustomGate(const CliArgs& a) {
 
     const char* viewNames[3] = {"front", "side", "back"};
     int hatChecked = 0, skinSeen = 0, skinSleeveSeen = 0, shirtSeen = 0,
-        customSeen = 0;
+        customSeen = 0, tipChecked = 0, hairDeleted = 0, hairSwing = 0;
+    int gChecks = 0;   // (G) merged-colour assertions executed / (G) 合并色断言执行数
     for (int v = 0; v < 3; ++v) {
         cv::Mat ref = fb::renderTemplateView(spec, v, err);
         if (ref.empty()) {
@@ -1702,13 +1703,16 @@ int runReplaceCustomGate(const CliArgs& a) {
             continue;
         }
 
-        // The custom view: a hat over rows 0-1 (transparent reference), a
+        // The custom view: a hat over rows 0-1 (transparent reference) with an
+        // outline-coloured tip beside it (the bob-tip regression case), a
         // sleeve painted over the first bare-skin cell, a white sleeve over
-        // the first shirt cell that is not already white.
-        // 自定义视图：行 0-1 上的帽子（参考处透明）、画在第一个裸肤格上的袖、
-        // 画在第一个非白上衣格上的白袖。
+        // the first shirt cell that is not already white, and one deleted hair
+        // cell (the recession case).
+        // 自定义视图：行 0-1 上的帽子（参考处透明）加一粒描边色尖角（波波头尖
+        // 回归用例）、画在第一个裸肤格上的袖、画在第一个非白上衣格上的白袖，
+        // 外加删掉一个发格（缩水用例）。
         cv::Mat custom = ref.clone();
-        int skinCell[2] = {-1, -1}, shirtCell[2] = {-1, -1};
+        int skinCell[2] = {-1, -1}, shirtCell[2] = {-1, -1}, hairCell[2] = {-1, -1};
         for (int y = 0; y < 32; ++y) {
             for (int x = 0; x < 32; ++x) {
                 const cv::Vec4b px = ref.at<cv::Vec4b>(y, x);
@@ -1721,17 +1725,41 @@ int runReplaceCustomGate(const CliArgs& a) {
                     px != whiteCol) {
                     shirtCell[0] = x; shirtCell[1] = y;
                 }
+                if (s == fb::SLOT_HAIR && hairCell[0] < 0) {
+                    hairCell[0] = x; hairCell[1] = y;
+                }
             }
         }
         for (int y = 0; y < 2; ++y)
             for (int x = 12; x < 18; ++x)
                 custom.at<cv::Vec4b>(y, x) = hatCol;
+        // Outline tip: one outline-coloured extension pixel beside the hat.
+        // Its slot must come from the neighbour vote (hair), not be dropped.
+        // 描边尖：帽子旁的一粒描边色扩展像素。它的槽必须来自邻域投票（发），
+        // 而不是被丢弃。
+        cv::Vec3b outlineRgb;
+        if (!spec.roleBgr("outline", outlineRgb)) {
+            std::cout << "palette missing outline   FAIL\n";
+            return 1;
+        }
+        const cv::Vec4b outlineCol(outlineRgb[0], outlineRgb[1], outlineRgb[2], 255);
+        custom.at<cv::Vec4b>(0, 11) = outlineCol;
         if (skinCell[0] >= 0)
             custom.at<cv::Vec4b>(skinCell[1], skinCell[0]) = sleeveCol;
         if (shirtCell[0] >= 0)
             custom.at<cv::Vec4b>(shirtCell[1], shirtCell[0]) = whiteCol;
+        // Recession: delete the first hair cell the reference design has.
+        // 缩水：删掉参考设计的第一个发格。
+        if (hairCell[0] >= 0)
+            custom.at<cv::Vec4b>(hairCell[1], hairCell[0]) = zero;
 
-        const fb::SlotSplit sp = fb::splitViewBySlot(custom, idMap, tables);
+        const fb::SlotSplit sp = fb::splitViewBySlot(custom, idMap, tables, ref);
+        if (sp.slotOf.at<signed char>(0, 11) != fb::SLOT_HAIR) {
+            std::cout << viewNames[v] << ": outline tip did not vote into "
+                      << "hair (slot " << (int)sp.slotOf.at<signed char>(0, 11)
+                      << ")   FAIL\n";
+            ++failures;
+        }
         if (skinCell[0] >= 0 &&
             sp.slotOf.at<signed char>(skinCell[1], skinCell[0]) != fb::SLOT_TOP) {
             std::cout << viewNames[v] << ": painted sleeve did not classify "
@@ -1775,15 +1803,23 @@ int runReplaceCustomGate(const CliArgs& a) {
                         ++hatChecked;
                     }
                 }
-                // (B) no holes: chip-opaque cells stay opaque.
-                // (B) 不出洞：芯片不透明处保持不透明。
+                // (B) no holes beyond the user's deletion: chip-opaque cells
+                // stay opaque, and the only transparent output allowed is the
+                // deleted hair cell (the recession rule).
+                // (B) 用户删除处之外不出洞：芯片不透明处保持不透明，唯一允许的
+                // 透明输出是删掉的发格（缩水规则）。
                 for (int y = 0; y < 32; ++y) {
                     for (int x = 0; x < 32; ++x) {
                         if (C.at<cv::Vec4b>(y, x)[3] != 0 &&
                             O.at<cv::Vec4b>(y, x)[3] == 0) {
-                            std::cout << name << " f" << i << " hole at ("
-                                      << x << "," << y << ")   FAIL\n";
-                            ++failures;
+                            const bool isDeleted =
+                                hairCell[0] >= 0 && x == hairCell[0] &&
+                                y == hairCell[1] + off;
+                            if (!isDeleted) {
+                                std::cout << name << " f" << i << " hole at ("
+                                          << x << "," << y << ")   FAIL\n";
+                                ++failures;
+                            }
                         }
                     }
                 }
@@ -1850,14 +1886,141 @@ int runReplaceCustomGate(const CliArgs& a) {
                         }
                     }
                 }
+                // (E) the outline-coloured extension tip enters as hair.
+                // (E) 描边色扩展尖以发槽进帧。
+                {
+                    const int fy = 0 + off;
+                    if (fy >= 0 && fy < 32) {
+                        if (O.at<cv::Vec4b>(fy, 11) != outlineCol) {
+                            std::cout << name << " f" << i
+                                      << ": outline tip missing at (11," << fy
+                                      << ")   FAIL\n";
+                            ++failures;
+                        }
+                        ++tipChecked;
+                    }
+                }
+                // (F) recession: the deleted hair cell goes transparent where
+                //     the frame draws hair there, and a non-hair occupant
+                //     (a passing limb) survives untouched.
+                // (F) 缩水：被删的发格在帧画发处变透明；非发占用（扫过的肢体）
+                //     原样保留。
+                if (hairCell[0] >= 0) {
+                    const int x = hairCell[0], fy = hairCell[1] + off;
+                    if (fy >= 0 && fy < 32) {
+                        const int sC = slotC.at<signed char>(fy, x);
+                        const cv::Vec4b Cpx = C.at<cv::Vec4b>(fy, x);
+                        const cv::Vec4b got = O.at<cv::Vec4b>(fy, x);
+                        if (Cpx[3] != 0 && sC == fb::SLOT_HAIR) {
+                            ++hairDeleted;
+                            if (got != zero) {
+                                std::cout << name << " f" << i
+                                          << ": deleted hair cell not "
+                                          << "suppressed at (" << x << "," << fy
+                                          << ")   FAIL\n";
+                                ++failures;
+                            }
+                        } else if (Cpx[3] != 0 && sC != fb::SLOT_HAIR) {
+                            ++hairSwing;
+                            if (got != Cpx) {
+                                std::cout << name << " f" << i
+                                          << ": non-hair occupant damaged at ("
+                                          << x << "," << fy << ")   FAIL\n";
+                                ++failures;
+                            }
+                        }
+                    }
+                }
             }
         }
     }
-    std::cout << "hat stamps " << hatChecked << ", skin defends "
-              << skinSeen << " (" << skinSleeveSeen
+    // (G) merged-colour repair (front view): recolour white AND skin to one
+    // pale — a many-to-one map. The slots must still split by the reference
+    // design, and a stray non-dst pixel must come out as map(N) — the
+    // majority repair the tolerant warning promises.
+    // (G) 合并色修复（正面视图）：白与肤都换成同一个浅色 —— 多对一映射。槽归属
+    // 必须仍按参考设计拆；游离的非目标色像素必须出 map(N) —— 宽容警告承诺的
+    // 主色修复。
+    {
+        cv::Mat ref = fb::renderTemplateView(spec, 0, err);
+        cv::Vec3b skinRgb;
+        if (ref.empty() || !spec.roleBgr("skin", skinRgb)) {
+            std::cout << "G: setup " << err << "   FAIL\n";
+            ++failures;
+        } else {
+            const cv::Vec4b skinSrc(skinRgb[0], skinRgb[1], skinRgb[2], 255);
+            const cv::Vec4b pale(240, 230, 250, 255);
+            const cv::Vec4b stray(1, 2, 3, 255);
+            cv::Mat merged = ref.clone();
+            int topCell[2] = {-1, -1}, bodyCell[2] = {-1, -1},
+                hairCell2[2] = {-1, -1};
+            for (int y = 0; y < 32; ++y) {
+                for (int x = 0; x < 32; ++x) {
+                    const cv::Vec4b px = ref.at<cv::Vec4b>(y, x);
+                    if (px[3] == 0) continue;
+                    const int s = tables.classifyPixel(
+                        cv::Vec3b(px[0], px[1], px[2]), y);
+                    if (px == whiteCol && s == fb::SLOT_TOP && topCell[0] < 0) {
+                        topCell[0] = x; topCell[1] = y;
+                    }
+                    if (px == skinSrc && s == fb::SLOT_BODY && bodyCell[0] < 0) {
+                        bodyCell[0] = x; bodyCell[1] = y;
+                    }
+                    if (s == fb::SLOT_HAIR && hairCell2[0] < 0) {
+                        hairCell2[0] = x; hairCell2[1] = y;
+                    }
+                    if (px == whiteCol || px == skinSrc)
+                        merged.at<cv::Vec4b>(y, x) = pale;
+                }
+            }
+            if (hairCell2[0] >= 0)
+                merged.at<cv::Vec4b>(hairCell2[1], hairCell2[0]) = stray;
+            fb::PaletteMap m2;
+            fb::ExtractStats st2;
+            if (!fb::extractPaletteMap(merged, ref, m2, err, &st2, true)) {
+                std::cout << "G: extractPaletteMap " << err << "   FAIL\n";
+                ++failures;
+            } else {
+                const fb::SlotSplit sp2 =
+                    fb::splitViewBySlot(merged, m2, tables, ref);
+                ++gChecks;
+                if (topCell[0] < 0 || bodyCell[0] < 0 || hairCell2[0] < 0 ||
+                    sp2.slotOf.at<signed char>(topCell[1], topCell[0]) != fb::SLOT_TOP ||
+                    sp2.slotOf.at<signed char>(bodyCell[1], bodyCell[0]) != fb::SLOT_BODY ||
+                    sp2.slotOf.at<signed char>(hairCell2[1], hairCell2[0]) != fb::SLOT_HAIR) {
+                    std::cout << "G: merged-colour slots did not follow the "
+                              << "reference design   FAIL\n";
+                    ++failures;
+                }
+                const fb::MotionChips* mc = chips.find("front_idle");
+                const std::vector<cv::Mat> out = mc ? fb::renderReplaced(
+                    *mc, m2, merged, sp2.slotOf, ref, bodyTop["front_idle"], tables)
+                                                    : std::vector<cv::Mat>();
+                ++gChecks;
+                // The stray cell renders at frame row fy = sy + (body_top - 2).
+                // 游离格渲染在帧行 fy = sy + (body_top - 2)。
+                const int fy = hairCell2[1] + bodyTop["front_idle"][0] - 2;
+                const bool okG = hairCell2[0] >= 0 && fy >= 0 && !out.empty() &&
+                                 fy < out[0].rows && hairCell2[0] < out[0].cols &&
+                                 out[0].at<cv::Vec4b>(fy, hairCell2[0]) ==
+                                     ref.at<cv::Vec4b>(hairCell2[1], hairCell2[0]);
+                if (!okG) {
+                    std::cout << "G: stray minority pixel not repaired to "
+                              << "map(N)   FAIL\n";
+                    ++failures;
+                }
+            }
+        }
+    }
+    std::cout << "hat stamps " << hatChecked << ", outline tips " << tipChecked
+              << ", skin defends " << skinSeen << " (" << skinSleeveSeen
               << " sleeve-on-shirt at skin cells), custom enters "
-              << customSeen << " of " << shirtSeen << " shirt-cell frames\n";
-    if (hatChecked == 0 || skinSeen == 0 || shirtSeen == 0 || customSeen == 0) {
+              << customSeen << " of " << shirtSeen << " shirt-cell frames, "
+              << "recession " << hairDeleted << " deleted-hair cells ("
+              << hairSwing << " non-hair pass-throughs), merged-colour "
+              << gChecks << " checks\n";
+    if (hatChecked == 0 || skinSeen == 0 || shirtSeen == 0 || customSeen == 0 ||
+        tipChecked == 0 || hairDeleted == 0 || gChecks < 2) {
         std::cout << "one of the behaviour counters is vacuous   FAIL\n";
         ++failures;
     }
