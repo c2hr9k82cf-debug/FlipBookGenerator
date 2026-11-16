@@ -170,18 +170,20 @@ bool AppState::runPipeline() {
     }
 
     if (!ensureChips()) return false;
+    if (!ensureTemplate()) return false;   // region tables + reference views /
+                                           // 区域表 + 参考视图
 
     // Tolerant mode: a silhouette mismatch warns instead of rejecting (the
     // sheet's shape comes from the chips; stray pixels cost nothing). The
-    // pipeline consumes the ALIGNED copies (v0.9.0) — buildFourDirSheet's
-    // signature is untouched, it just receives better inputs.
+    // pipeline consumes the ALIGNED copies (v0.9.0) — buildFourDirSheet just
+    // receives better inputs.
     // 宽容模式：剪影不齐只提醒、不拒绝（大图形状来自芯片；杂散像素无伤大雅）。
-    // 管线消费对齐拷贝（v0.9.0）—— buildFourDirSheet 签名不动，只是收到更好的输入。
+    // 管线消费对齐拷贝（v0.9.0）—— buildFourDirSheet 只是收到更好的输入。
     fb::ExtractStats stats[3];
     std::string err;
     if (!fb::buildFourDirSheet(views[FRONT].aligned, views[SIDE].aligned,
-                               views[BACK].aligned, chips, result, err,
-                               stats, /*tolerantMask=*/true)) {
+                               views[BACK].aligned, chips, templateSpec,
+                               result, err, stats, /*tolerantMask=*/true)) {
         result = fb::FourDirResult{};
         pipelineError = err;
         status = "管线失败：" + err;

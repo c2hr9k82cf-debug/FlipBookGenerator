@@ -402,23 +402,31 @@ bool composeFourDirSheet(const FourDirRows& rows, cv::Size cell,
                          cv::Mat& out, std::string& err);
 
 // The full app pipeline: extract palettes from three template-aligned user
-// views, reskin the chips, assemble the rows, compose the sheet. Enforces the
-// coverage invariant — every opaque output pixel must be a map destination,
-// which catches a walk-frame colour that idle frame 0 never showed.
-// app 完整管线：从三张模板对齐的用户视图提取配色、给芯片换皮、组装各行、拼成
-// 大图。执行覆盖不变量 —— 每个非透明输出像素必须是映射目标色，抓"行走帧有
-// idle 第 0 帧没出现过的颜色"这类回归。
+// views, per-frame region-replace the chips with the user's shapes (M21),
+// assemble the rows, compose the sheet. Enforces the coverage invariant —
+// every opaque output pixel must be a map destination OR a user-view colour,
+// which catches a walk-frame colour that idle frame 0 never showed (FRAME
+// leak) while allowing user shape/colour extensions (MATERIAL).
+// app 完整管线：从三张模板对齐的用户视图提取配色、逐帧区域替换把用户形状带进
+// 芯片帧（M21）、组装各行、拼成大图。执行覆盖不变量 —— 每个非透明输出像素必须
+// 是映射目标色或用户视图颜色，既抓"行走帧有 idle f0 没出现过的颜色"（FRAME
+// 泄漏），又放行用户形状/颜色扩展（MATERIAL）。
+struct TemplateSpec;                   // template_spec.h / 见 template_spec.h
 struct FourDirResult {
     cv::Mat sheet;                     // the big PNG / 最终大图
     FourDirRows rows;                  // assembled rows (for tests/preview) / 组装的行
     std::array<PaletteMap, 3> maps;    // extracted maps: front, side, back / 提取的映射
 };
-// stats[3] (optional) receives per-view extraction diagnostics; tolerantMask
-// passes through to extractPaletteMap (warn, don't reject — the GUI's mode).
-// stats[3]（可选）接收各视图的提取诊断；tolerantMask 透传给 extractPaletteMap
-// （提醒而不拒绝 —— GUI 的模式）。
+// `spec` supplies the region tables, the reference views (renderTemplateView)
+// and anim_reference.json (per-frame body_top_y). stats[3] (optional) receives
+// per-view extraction diagnostics; tolerantMask passes through to
+// extractPaletteMap (warn, don't reject — the GUI's mode).
+// `spec` 提供区域表、参考视图（renderTemplateView）与 anim_reference.json
+// （逐帧 body_top_y）。stats[3]（可选）接收各视图的提取诊断；tolerantMask 透传
+// 给 extractPaletteMap（提醒而不拒绝 —— GUI 的模式）。
 bool buildFourDirSheet(const cv::Mat& front, const cv::Mat& side, const cv::Mat& back,
-                       const ChipSet& chips, FourDirResult& out, std::string& err,
+                       const ChipSet& chips, const TemplateSpec& spec,
+                       FourDirResult& out, std::string& err,
                        ExtractStats stats[3] = nullptr, bool tolerantMask = false);
 
 }  // namespace fb

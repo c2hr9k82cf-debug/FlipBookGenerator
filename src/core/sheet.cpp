@@ -9,6 +9,9 @@
 
 #include "core.h"
 
+#include "replace.h"
+#include "template_spec.h"
+
 #include <set>
 #include <sstream>
 
@@ -77,7 +80,8 @@ bool composeFourDirSheet(const FourDirRows& rows, cv::Size cell,
 }
 
 bool buildFourDirSheet(const cv::Mat& front, const cv::Mat& side, const cv::Mat& back,
-                       const ChipSet& chips, FourDirResult& out, std::string& err,
+                       const ChipSet& chips, const TemplateSpec& spec,
+                       FourDirResult& out, std::string& err,
                        ExtractStats stats[3], bool tolerantMask) {
     out = FourDirResult{};
 
@@ -94,6 +98,14 @@ bool buildFourDirSheet(const cv::Mat& front, const cv::Mat& side, const cv::Mat&
               "(need front/side/back x idle/walk)";
         return false;
     }
+
+    // Region tables + per-frame body_top_y: the M21 replacement inputs.
+    // 区域表 + 逐帧 body_top_y：M21 替换的输入。
+    SlotTables tables;
+    if (!buildSlotTables(spec, tables, err)) return false;
+    std::map<std::string, std::vector<int>> bodyTop;
+    if (!loadAnimBodyTop(spec.baseDir + "/anim_reference.json", bodyTop, err))
+        return false;
 
     const cv::Mat* views[3]   = {&front, &side, &back};
     const MotionChips* idles[3] = {fbIdle, sdIdle, bkIdle};
@@ -116,18 +128,56 @@ bool buildFourDirSheet(const cv::Mat& front, const cv::Mat& side, const cv::Mat&
             return false;
         }
 
-        idleFrames[v] = renderFromChips(*idles[v], out.maps[v]);
-        walkFrames[v] = renderFromChips(*walks[v], out.maps[v]);
+        // The replacement reference = the normal-pose view re-rendered from
+        // the template (NOT the idle f0 chip — the two happen to match today,
+        // but only the template is the standing reference). User slots are
+        // precomputed once per view and shared by idle and walk.
+        // 替换参考 = 从模板重渲染的规范姿态视图（不是 idle f0 芯片 —— 两者今天
+        // 恰好相同，但只有模板才是常驻参考）。用户槽图每视图算一次，idle 与 walk
+        // 共用。
+        std::string refErr;
+        cv::Mat refView = renderTemplateView(spec, v, refErr);
+        if (refView.empty()) {
+            err = std::string("buildFourDirSheet: ") + viewNames[v] +
+                  " reference view: " + refErr;
+            return false;
+        }
+        const SlotSplit userSplit = splitViewBySlot(*views[v], out.maps[v], tables);
+
+        const std::string idleName = std::string(viewNames[v]) + "_idle";
+        const std::string walkName = std::string(viewNames[v]) + "_walk";
+        idleFrames[v] = renderReplaced(*idles[v], out.maps[v], *views[v],
+                                       userSplit.slotOf, refView,
+                                       bodyTop[idleName], tables);
+        walkFrames[v] = renderReplaced(*walks[v], out.maps[v], *views[v],
+                                       userSplit.slotOf, refView,
+                                       bodyTop[walkName], tables);
+        if (idleFrames[v].empty() || walkFrames[v].empty()) {
+            err = std::string("buildFourDirSheet: ") + viewNames[v] +
+                  ": anim_reference.json frame counts do not match the chips";
+            return false;
+        }
     }
 
-    // Coverage invariant: every opaque output pixel must be a map destination.
-    // A walk-frame colour that idle frame 0 never showed would survive the
-    // palette swap as an original (reference-sheet) colour and be caught here.
-    // 覆盖不变量：每个非透明输出像素必须是映射目标色。行走帧若用了 idle 第 0 帧
-    // 没出现的颜色，会以原参考色漏过换色 —— 在这里被抓住。
+    // Coverage invariant: every opaque output pixel must be a palette-map
+    // destination OR a user-view colour. A FRAME leak (a walk-frame colour
+    // idle frame 0 never showed) survives the swap as an original
+    // (reference-sheet) colour and is caught; a MATERIAL extension outputs its
+    // own user colour and passes.
+    // 覆盖不变量：每个非透明输出像素必须是映射目标色或用户视图颜色。FRAME 泄漏
+    // （行走帧用了 idle f0 没出现过的颜色）会以原参考色漏过换色 —— 抓住；MATERIAL
+    // 扩展出的是用户自己的颜色 —— 放行。
     for (int v = 0; v < 3; ++v) {
-        std::set<uint32_t> dst;
-        for (const auto& sw : out.maps[v]) dst.insert(colourKey(sw.second));
+        std::set<uint32_t> allowed;
+        for (const auto& sw : out.maps[v]) allowed.insert(colourKey(sw.second));
+        {
+            const cv::Mat& u = *views[v];
+            for (int y = 0; y < u.rows; ++y) {
+                const cv::Vec4b* row = u.ptr<cv::Vec4b>(y);
+                for (int x = 0; x < u.cols; ++x)
+                    if (row[x][3] != 0) allowed.insert(colourKey(row[x]));
+            }
+        }
         for (int pass = 0; pass < 2; ++pass) {
             const std::vector<cv::Mat>& fr = pass ? walkFrames[v] : idleFrames[v];
             for (size_t i = 0; i < fr.size(); ++i) {
@@ -136,16 +186,17 @@ bool buildFourDirSheet(const cv::Mat& front, const cv::Mat& side, const cv::Mat&
                     const cv::Vec4b* row = f.ptr<cv::Vec4b>(y);
                     for (int x = 0; x < f.cols; ++x) {
                         if (row[x][3] == 0) continue;
-                        if (!dst.count(colourKey(row[x]))) {
+                        if (!allowed.count(colourKey(row[x]))) {
                             std::ostringstream os;
                             os << "buildFourDirSheet: " << viewNames[v] << " "
                                << (pass ? "walk" : "idle") << " f" << i
                                << " pixel (" << x << "," << y << ") colour "
                                << (int)row[x][0] << "," << (int)row[x][1] << ","
                                << (int)row[x][2] << "," << (int)row[x][3]
-                               << " is not a palette destination — the view's "
-                               << "idle frame 0 did not cover it (add the tone "
-                               << "or fix the input / idle f0 未覆盖该色)";
+                               << " is neither a palette destination nor a "
+                               << "user-view colour — the view's idle frame 0 "
+                               << "did not cover it (add the tone or fix the "
+                               << "input / idle f0 未覆盖该色)";
                             err = os.str();
                             return false;
                         }

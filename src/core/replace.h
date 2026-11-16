@@ -119,4 +119,35 @@ bool loadAnimBodyTop(const std::string& jsonPath,
                      std::map<std::string, std::vector<int>>& out,
                      std::string& err);
 
+// Per-frame region replacement renderer (M21, plan D5).
+// 逐帧区域替换渲染器（M21，计划 D5）。
+//
+// For each frame cell (x, y) the FRAME occupant (the chip pixel, z = its
+// slot's layer, colour = PaletteMap(chip)) competes with the MATERIAL — the
+// user view's pixel sampled at the normal-pose position (x, sy),
+// sy = y - (body_top_y - 2). The material only enters when the reference is
+// transparent there (a user shape extension) or the chip paints the cell;
+// higher defaultLayerZ wins, ties go to the material. A material that
+// follows the reference colour layout outputs the mapped chip colour (the
+// per-frame tone/redraw language survives); a deviating material outputs its
+// own colour. With the user view equal to the reference and an identity map
+// every cell outputs the chip pixel exactly — the replace_fidelity
+// invariant, proven in the M21 design and gated in batch 3.
+// 对每个帧格 (x,y)：帧占用（芯片像素，z = 槽层序，色 = PaletteMap(芯片)）与
+// 素材（用户视图在规范位置 (x,sy) 的像素，sy = y - (body_top_y - 2)）竞争。
+// 素材仅当参考处透明（用户形状扩展）或芯片画了这格才进候选；z 大者胜，平票
+// 素材胜。沿用参考色布局的素材输出换色后的芯片色（逐帧色调/重绘语言得以保留）
+// ；偏离的素材出自己的颜色。用户视图==参考且 map 恒等时逐格必输出芯片像素
+// —— replace_fidelity 不变量，M21 设计中已证，批次③闸门把守。
+//
+// `userSlots` = splitViewBySlot(userView, map, t).slotOf (pass it precomputed).
+// `refView`   = the normal-pose reference of this view (renderTemplateView).
+// `bodyTop`   = per-frame body_top_y (loadAnimBodyTop), one entry per frame.
+// 返回空 vector 表示 bodyTop 与帧数不符。
+std::vector<cv::Mat> renderReplaced(const MotionChips& chips, const PaletteMap& map,
+                                    const cv::Mat& userView, const cv::Mat& userSlots,
+                                    const cv::Mat& refView,
+                                    const std::vector<int>& bodyTop,
+                                    const SlotTables& t);
+
 }  // namespace fb

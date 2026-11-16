@@ -4,6 +4,7 @@
 #include "core/replace.h"
 
 #include "core/json_min.h"
+#include "core/parts_library.h"   // defaultLayerZ
 
 #include <algorithm>
 #include <fstream>
@@ -284,6 +285,95 @@ bool loadAnimBodyTop(const std::string& jsonPath,
         out[fb.first] = std::move(tops);
     }
     return true;
+}
+
+std::vector<cv::Mat> renderReplaced(const MotionChips& chips, const PaletteMap& map,
+                                    const cv::Mat& userView, const cv::Mat& userSlots,
+                                    const cv::Mat& refView,
+                                    const std::vector<int>& bodyTop,
+                                    const SlotTables& t) {
+    std::vector<cv::Mat> frames;
+    if (bodyTop.size() != chips.frames.size()) return frames;   // caller guards / 调用方守
+    if (userView.empty() || userSlots.empty() || refView.empty()) return frames;
+    if (userView.size() != refView.size() || userSlots.size() != refView.size())
+        return frames;
+
+    // Exact-colour palette lookup (the applyPaletteMap rule: no match = keep).
+    // 精确换色查表（applyPaletteMap 的规则：无匹配 = 原样）。
+    auto colourKey4 = [](const cv::Vec4b& c) {
+        return (uint32_t)c[0] | ((uint32_t)c[1] << 8) | ((uint32_t)c[2] << 16) |
+               ((uint32_t)c[3] << 24);
+    };
+    std::map<uint32_t, cv::Vec4b> lut;
+    for (const auto& sw : map) lut[colourKey4(sw.first)] = sw.second;
+    auto mapColour = [&](const cv::Vec4b& px) {
+        auto it = lut.find(colourKey4(px));
+        return it == lut.end() ? px : it->second;
+    };
+    // defaultLayerZ: pants/boots 10 < top 20 < face 30 < body(bare skin) 45 <
+    // hair 50. / 层序表。
+    int zOf[6];
+    for (int s = 0; s < 6; ++s) zOf[s] = defaultLayerZ(slotNames()[(size_t)s], false);
+
+    frames.reserve(chips.frames.size());
+    for (size_t f = 0; f < chips.frames.size(); ++f) {
+        const cv::Mat& C = chips.frames[f];
+        const int off = bodyTop[f] - 2;
+        const cv::Mat slotC = classifyFrame(C, off, t);
+        cv::Mat out = cv::Mat::zeros(C.rows, C.cols, CV_8UC4);
+        for (int y = 0; y < C.rows; ++y) {
+            for (int x = 0; x < C.cols; ++x) {
+                const cv::Vec4b Cpx = C.at<cv::Vec4b>(y, x);
+                // Material position in normal coords / 素材的规范坐标位置
+                const int sy = y - off;
+                const bool inView = sy >= 0 && sy < refView.rows && x < refView.cols;
+                const cv::Vec4b zero(0, 0, 0, 0);
+                const cv::Vec4b Npx = inView ? refView.at<cv::Vec4b>(sy, x) : zero;
+                const cv::Vec4b Upx = inView ? userView.at<cv::Vec4b>(sy, x) : zero;
+
+                int bestZ = -1;
+                cv::Vec4b bestCol = zero;
+                bool have = false;
+                // FRAME candidate: the chip occupant at its slot's layer.
+                // 帧占用候选：芯片像素，按其槽层序。
+                if (Cpx[3] != 0) {
+                    const signed char sC = slotC.at<signed char>(y, x);
+                    bestZ = (sC >= 0) ? zOf[(size_t)sC] : 0;   // unowned = bottom / 无主垫底
+                    bestCol = mapColour(Cpx);
+                    have = true;
+                }
+                // MATERIAL candidate — gate: the reference is transparent here
+                // (user extension) OR the chip paints the cell. Without the
+                // gate a swinging leg's vacated cell would keep showing the
+                // static leg (double legs).
+                // 素材候选 —— 闸门：参考处透明（用户扩展）或芯片画了这格。没闸门
+                // 的话摆腿腾空的格会继续显示静态腿（双腿重影）。
+                if (Upx[3] != 0 && (Npx[3] == 0 || Cpx[3] != 0)) {
+                    const signed char sU = userSlots.at<signed char>(sy, x);
+                    if (sU >= 0) {
+                        // M15 colour rule: follows the reference layout ->
+                        // mapped chip colour (tone swaps survive); deviates ->
+                        // its own colour.
+                        // M15 色规：沿参考布局 -> 换色后的芯片色（色调交换存活）；
+                        // 偏离 -> 出自己的色。
+                        const bool follows = Npx[3] != 0 && Upx == mapColour(Npx);
+                        const cv::Vec4b colM = follows ? mapColour(Cpx) : Upx;
+                        const int zM = zOf[(size_t)sU];
+                        // Higher z wins, ties go to the material.
+                        // z 大者胜，平票素材胜。
+                        if (!have || zM >= bestZ) {
+                            bestZ = zM;
+                            bestCol = colM;
+                            have = true;
+                        }
+                    }
+                }
+                if (have) out.at<cv::Vec4b>(y, x) = bestCol;
+            }
+        }
+        frames.push_back(out);
+    }
+    return frames;
 }
 
 }  // namespace fb

@@ -2796,9 +2796,9 @@ int runComposeGate(const CliArgs& a) {
             fb::FourDirResult r1, r2;
             std::string e1, e2;
             const bool ok1 = fb::buildFourDirSheet(
-                composed[0], composed[1], composed[2], chips, r1, e1);
+                composed[0], composed[1], composed[2], chips, spec, r1, e1);
             const bool ok2 = fb::buildFourDirSheet(
-                refImgs[0], refImgs[1], refImgs[2], chips, r2, e2);
+                refImgs[0], refImgs[1], refImgs[2], chips, spec, r2, e2);
             if (!ok1 || !ok2 || !sameMat(r1.sheet, r2.sheet)) {
                 std::cout << "  full chain: sheet mismatch (" << e1 << " / "
                           << e2 << ")   FAIL\n";
@@ -3333,20 +3333,25 @@ int runFourdirGate(const CliArgs& a) {
     if (!fb::loadChipSet(a.chips, cs, err)) { std::cerr << "FAIL: " << err << "\n"; return 1; }
     fb::PaletteMap map;
     if (!fb::loadPaletteMap(a.map, map, err)) { std::cerr << "FAIL: " << err << "\n"; return 1; }
+    fb::TemplateSpec spec;
+    if (!fb::loadTemplateSpec(a.templates + "/chibi_standard.json", spec, err)) {
+        std::cerr << "FAIL: " << err << "\n"; return 1;
+    }
 
-    // Synthetic user views: idle frame 0 with the map applied.
-    // 合成用户视图：对 idle f0 应用映射。
+    // Synthetic user views: the reference views with the map applied (M21's
+    // replace_fidelity input shape — user == recoloured reference).
+    // 合成用户视图：参考视图应用映射（M21 的 replace_fidelity 输入形态 ——
+    // 用户 == 换色后的参考）。
     const char* viewNames[3] = {"front", "side", "back"};
     cv::Mat user[3];
     for (int v = 0; v < 3; ++v) {
-        const fb::MotionChips* idle = cs.find(std::string(viewNames[v]) + "_idle");
-        if (!idle) { std::cerr << "FAIL: chip set missing " << viewNames[v] << "_idle\n"; return 1; }
-        user[v] = idle->frames[0].clone();
+        user[v] = fb::renderTemplateView(spec, v, err);
+        if (user[v].empty()) { std::cerr << "FAIL: " << err << "\n"; return 1; }
         fb::applyPaletteMap(user[v], map);
     }
 
     fb::FourDirResult res;
-    if (!fb::buildFourDirSheet(user[0], user[1], user[2], cs, res, err)) {
+    if (!fb::buildFourDirSheet(user[0], user[1], user[2], cs, spec, res, err)) {
         std::cerr << "FAIL: buildFourDirSheet: " << err << "\n";
         return 1;
     }
@@ -3486,6 +3491,10 @@ int runFourdir(const CliArgs& a) {
     fb::ChipSet cs;
     std::string err;
     if (!fb::loadChipSet(a.chips, cs, err)) { std::cerr << "FAIL: " << err << "\n"; return 1; }
+    fb::TemplateSpec spec;
+    if (!fb::loadTemplateSpec(a.templates + "/chibi_standard.json", spec, err)) {
+        std::cerr << "FAIL: " << err << "\n"; return 1;
+    }
 
     cv::Mat views[3];
     const std::string paths[3] = {a.frontImg, a.sideImg, a.backImg};
@@ -3497,7 +3506,7 @@ int runFourdir(const CliArgs& a) {
     }
 
     fb::FourDirResult res;
-    if (!fb::buildFourDirSheet(views[0], views[1], views[2], cs, res, err)) {
+    if (!fb::buildFourDirSheet(views[0], views[1], views[2], cs, spec, res, err)) {
         std::cerr << "FAIL: " << err << "\n";
         return 1;
     }
