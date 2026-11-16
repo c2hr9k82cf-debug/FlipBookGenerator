@@ -92,17 +92,26 @@ const std::vector<std::string>& librarySlotNames() {
     return kSlots;
 }
 
-int defaultZOrderForSlot(const std::string& slot) {
-    // Matches the shipped reference items (v0.11.2 fix A). Unknown slot gets
-    // 0 on purpose — better invisible than wrongly on top.
-    // 与随附参考物品一致（v0.11.2 修复 A）。未知槽位故意给 0 —— 宁可看不见，
-    // 不可错在顶上。
-    if (slot == "hair") return 40;
+int defaultLayerZ(const std::string& slot, bool backPiece) {
+    // v0.12.0 plan D3. Back-layer pieces (hair back-of-head) bed down at the
+    // very bottom; the bare-skin body sits ABOVE the top (z45 > z20) as the
+    // defensive layer — a shirt painted into arm cells gets covered by the
+    // arm, never the other way round. Unknown slot gets 0 on purpose —
+    // better invisible than wrongly on top.
+    // v0.12.0 计划 D3。垫底片（hair 后发片）永远垫最底；裸肤 body 在上衣之上
+    // （z45 > z20）作防御层 —— 衣服画进臂格时被胳膊盖住，绝不反过来。未知槽位
+    // 故意给 0 —— 宁可看不见，不可错在顶上。
+    if (backPiece) return 5;
+    if (slot == "hair") return 50;
     if (slot == "face") return 30;
     if (slot == "top") return 20;
     if (slot == "pants" || slot == "boots") return 10;
-    if (slot == "body") return 5;
+    if (slot == "body") return 45;
     return 0;
+}
+
+int defaultZOrderForSlot(const std::string& slot) {
+    return defaultLayerZ(slot, false);
 }
 
 const LibraryItem* PartsLibrary::find(const std::string& slot,
@@ -262,6 +271,25 @@ bool loadLibraryItem(const std::string& itemDir, const std::string& slot,
         // auto 却带 back.png 是歧义（用文件还是推断？）：宁可拒绝也不猜。
         err = where + ": back:\"auto\" but back.png exists — set back:\"file\" or remove it";
         return false;
+    }
+
+    // -- optional back-layer pieces ("X_b.png", v0.12.0) / 可选垫底片 --
+    // Absent is fine (single-piece compat: compose stamps the main piece
+    // twice). Under back:"auto" inference owns the back pieces, so a
+    // hand-drawn back_b.png is refused just like back.png above.
+    // 缺省合法（单片兼容：合成端主片贴两次）。back:"auto" 时推断拥有背面两片，
+    // 手绘 back_b.png 与上面的 back.png 同理拒绝。
+    const char* kStem[3] = {"front", "side", "back"};
+    for (int v = 0; v < 3; ++v) {
+        const std::string bp = itemDir + "/" + kStem[v] + "_b.png";
+        if (!fs::exists(bp)) continue;
+        if (v == 2 && out.backMode == "auto") {
+            err = where + ": back:\"auto\" but back_b.png exists — inference owns "
+                          "the back pieces; remove it or set back:\"file\"";
+            return false;
+        }
+        if (!loadViewPng(bp, expectedSize, out.viewsB[v], err)) return false;
+        out.hasB[v] = true;
     }
     return true;
 }

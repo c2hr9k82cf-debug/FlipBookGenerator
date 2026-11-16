@@ -1352,6 +1352,10 @@ int runPartsLibraryGate(const CliArgs& a) {
     // ---- happy path / 正向 ----
     {
         makeItem(root / "hair" / "hair_test", hairJson);
+        // Double-piece item (v0.12.0): hair carries optional back-layer
+        // pieces. / 双片件（v0.12.0）：hair 带可选垫底片。
+        writePng(root / "hair" / "hair_test" / "front_b.png", hairCol);
+        writePng(root / "hair" / "hair_test" / "side_b.png", hairCol);
         makeItem(root / "top" / "shirt_test", topJson);
         writePng(root / "top" / "shirt_test" / "back.png", hairCol);
 
@@ -1395,10 +1399,16 @@ int runPartsLibraryGate(const CliArgs& a) {
                 check(!hair->views[0].empty() && !hair->views[1].empty() &&
                       hair->views[2].empty(),
                       "front+side loaded, back empty under back:\"auto\"");
+                check(hair->hasB[0] && !hair->viewsB[0].empty() &&
+                      hair->hasB[1] && !hair->viewsB[1].empty() &&
+                      !hair->hasB[2] && hair->viewsB[2].empty(),
+                      "back-layer pieces: front_b/side_b loaded, back_b absent");
             }
             if (top) {
                 check(top->backMode == "file" && !top->views[2].empty(),
                       "back:\"file\" loads back.png");
+                check(!top->hasB[0] && !top->hasB[1] && !top->hasB[2],
+                      "single-piece item: no back-layer pieces (compat path)");
             }
         }
     }
@@ -1433,6 +1443,13 @@ int runPartsLibraryGate(const CliArgs& a) {
          }},
         {"auto_with_back",
          [&](const fs::path& d) { writePng(d / "back.png", hairCol); }},
+        {"auto_with_back_b",
+         [&](const fs::path& d) { writePng(d / "back_b.png", hairCol); }},
+        {"wrong_size_b",
+         [&](const fs::path& d) {
+             cv::Mat img(24, 24, CV_8UC4, cv::Scalar(0, 0, 0, 0));
+             cv::imwrite((d / "front_b.png").string(), img);
+         }},
         {"roles_no_dst",
          [&](const fs::path& d) {
              writeText(d / "item.json",
@@ -1459,6 +1476,27 @@ int runPartsLibraryGate(const CliArgs& a) {
             ++failures;
         } else {
             std::cout << "  " << bc.name << ": refused (" << err << ")   OK\n";
+        }
+    }
+
+    // ---- layering table (v0.12.0 plan D3) / 层序表（v0.12.0 计划 D3） ----
+    {
+        int bad = 0;
+        const std::pair<const char*, int> mainZ[6] = {
+            {"hair", 50}, {"face", 30}, {"top", 20},
+            {"pants", 10}, {"boots", 10}, {"body", 45}};
+        for (const auto& mz : mainZ) {
+            if (fb::defaultLayerZ(mz.first, false) != mz.second) ++bad;
+            if (fb::defaultZOrderForSlot(mz.first) != mz.second) ++bad;
+            if (fb::defaultLayerZ(mz.first, true) != 5) ++bad;  // beds down / 恒垫底
+        }
+        if (fb::defaultLayerZ("nonsense", false) != 0) ++bad;
+        if (bad) {
+            std::cout << "  layering table: " << bad << " wrong z value(s)   FAIL\n";
+            ++failures;
+        } else {
+            std::cout << "  layering table: pants/boots 10, top 20, face 30, "
+                         "body 45, hair 50, back-layer 5   OK\n";
         }
     }
 
@@ -2303,7 +2341,7 @@ int runComposeGate(const CliArgs& a) {
     //         （v0.11.2 修复 A —— 用户自制件绝不能因为 JSON 精简就垫到一切底下） ----
     {
         int bad = 0;
-        const int want[6] = {40, 30, 20, 10, 10, 5};
+        const int want[6] = {50, 30, 20, 10, 10, 45};
         for (int i = 0; i < 6; ++i)
             if (fb::defaultZOrderForSlot(slots[i]) != want[i]) ++bad;
         if (fb::defaultZOrderForSlot("nonsense") != 0) ++bad;
@@ -2326,9 +2364,9 @@ int runComposeGate(const CliArgs& a) {
             std::cout << "  default zOrder: load failed: " << zerr
                       << "   FAIL\n";
             ++bad;
-        } else if (item.zOrder != 40) {
+        } else if (item.zOrder != 50) {
             std::cout << "  default zOrder: omitted zOrder got "
-                      << item.zOrder << ", want 40 (hair)   FAIL\n";
+                      << item.zOrder << ", want 50 (hair)   FAIL\n";
             ++bad;
         }
         fs::remove_all(zroot, ec);

@@ -46,6 +46,17 @@ struct LibraryItem {
     // backMode == "auto" 时 back 可为空（合成时推断）。
     cv::Mat views[3];
 
+    // Per-view BACK-LAYER piece ("X_b.png" — for hair: the back-of-head
+    // piece). Optional (v0.12.0): when absent, compose stamps the main piece
+    // twice (back-layer position + front-layer position), which reproduces
+    // the old single-piece look pixel-for-pixel. viewsB[2] is empty under
+    // backMode == "auto" — inference owns both back pieces there.
+    // 逐视图垫底片（X_b.png —— hair 即后发片）。可选（v0.12.0）：缺省时合成端
+    // 把主片贴两次（垫底位 + 盖顶位），逐像素等于旧单片观感。backMode ==
+    // "auto" 时 viewsB[2] 为空 —— 推断拥有背面两片。
+    cv::Mat viewsB[3];
+    bool hasB[3] = {false, false, false};
+
     // Per-view anchor overrides (part pivot hints). / 逐视图锚点覆盖。
     bool hasAnchor[3] = {false, false, false};
     cv::Point anchors[3];
@@ -82,13 +93,25 @@ struct PartsLibrary {
 // The six legal slots (PartLayer slots). / 六个合法槽位（PartLayer 槽位）。
 const std::vector<std::string>& librarySlotNames();
 
-// Default compositing order per slot (v0.11.2 fix A): body 5, pants/boots 10,
-// top 20, face 30, hair 40. Used when item.json omits "zOrder" — the old 0
-// default sank user-made items under everything (the "parts all wrong" bug).
-// 按槽缺省合成序（v0.11.2 修复 A）：body 5、pants/boots 10、top 20、face 30、
-// hair 40。item.json 没写 "zOrder" 时用它 —— 旧缺省 0 把用户自制部件垫到一切
-// 底下（"部位对应全错"的主因）。
+// Default compositing order per slot (v0.11.2 fix A, numbers updated in
+// v0.12.0): pants/boots 10, top 20, face 30, body 45, hair 50. Used when
+// item.json omits "zOrder" — the old 0 default sank user-made items under
+// everything (the "parts all wrong" bug). Equals defaultLayerZ(slot, false).
+// 按槽缺省合成序（v0.11.2 修复 A，数值 v0.12.0 更新）：pants/boots 10、
+// top 20、face 30、body 45、hair 50。item.json 没写 "zOrder" 时用它 —— 旧缺省
+// 0 把用户自制部件垫到一切底下（"部位对应全错"的主因）。等于
+// defaultLayerZ(slot, false)。
 int defaultZOrderForSlot(const std::string& slot);
+
+// Per-(slot, piece) layering table (v0.12.0, plan D3). The back-layer piece
+// (hair back-of-head, "X_b.png") always sits at the very bottom (z=5) — it
+// is the bedding under clothes and face. Main pieces follow the table:
+// pants/boots 10 → top 20 → face 30 → bare-skin body 45 (the defensive layer
+// that keeps a stray shirt from swallowing the arms) → hair front 50.
+// 按（槽, 片）的层序表（v0.12.0，计划 D3）。垫底片（hair 后发片，X_b.png）恒在
+// 最底（z=5）—— 它是衣服和脸下面的衬底。主片按表：pants/boots 10 → top 20 →
+// face 30 → 裸肤 body 45（防御层，防越界上衣吞胳膊）→ hair 前发 50。
+int defaultLayerZ(const std::string& slot, bool backPiece);
 
 // Load a whole library directory (slot folders → item folders). An invalid
 // item fails the whole load with a reason naming the offending folder —
