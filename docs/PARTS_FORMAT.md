@@ -119,7 +119,8 @@ main sprite stamps twice, pixel-identical to the old look.
 
 **绘制契约：部件只许画在本槽轮廓框内。** 这就是"上衣不许吞胳膊"的机制 ——
 臂格只属于臂的框，上衣画过去会被拒绝。框**允许重叠**（袖格同属 top 框与
-body 框）；重叠格的逐帧归属由动画端的区域替换决定（阶段二）。
+body 框）；重叠格的逐帧归属由动画端的区域替换决定（v0.13.0 已落地，见
+`docs/REPLACE_SPEC.md`）。
 
 - 编辑器画布把框外打灰；保存时框外有不透明像素 → **拒绝保存**并报出越界
   像素数（`saveEditorItem` + `outOfBoxPixels`）。
@@ -135,7 +136,7 @@ by `tools/extract_regions.py`).
 what keeps a shirt from swallowing the arms — arm cells belong to the arm
 box only. Boxes **may overlap** (a sleeve cell is in both the top and body
 boxes); per-frame ownership of overlapping cells is the animation-side
-region replacement's job (phase 2).
+region replacement's job (shipped in v0.13.0 — see `docs/REPLACE_SPEC.md`).
 
 - The editor greys the area outside the box; saving with out-of-box opaque
   pixels is **refused** with the count (`saveEditorItem` + `outOfBoxPixels`).
